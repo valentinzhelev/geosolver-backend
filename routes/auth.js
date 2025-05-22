@@ -70,6 +70,7 @@ router.post('/login', async (req, res) => {
       refreshToken
     });
   } catch (err) {
+    console.error('Login error:', err);
     res.status(500).json({ message: 'Грешка при вход.' });
   }
 });
