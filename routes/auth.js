@@ -5,8 +5,21 @@ const User = require('../models/User');
 const auth = require('../middleware/auth');
 const requireRole = require('../middleware/role');
 const crypto = require('crypto');
+const { sendMail } = require('../utils/mailer');
+const nodemailer = require('nodemailer');
 
 const router = express.Router();
+
+// SMTP transporter
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: Number(process.env.SMTP_PORT),
+  secure: process.env.SMTP_SECURE === 'true',
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+  },
+});
 
 // POST /api/auth/register
 router.post('/register', async (req, res) => {
@@ -20,12 +33,18 @@ router.post('/register', async (req, res) => {
     const verificationToken = crypto.randomBytes(32).toString('hex');
     const user = await User.create({ name, email, password: hashed, role: 'free', refreshTokens: [refreshToken], isVerified: false, verificationToken });
     const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '15m' });
-    // TODO: изпрати verificationToken по email
+    // Изпрати verificationToken по email
+    const verificationLink = `${process.env.BASE_URL || 'http://localhost:3000'}/api/auth/verify?token=${verificationToken}`;
+    await sendMail({
+      to: user.email,
+      subject: 'Потвърждение на имейл в GeoSolver',
+      html: `<p>Здравей,</p><p>Благодарим за регистрацията!</p><p>За да потвърдиш имейла си, кликни на линка по-долу:</p><p><a href="${verificationLink}">${verificationLink}</a></p>`
+    });
     res.status(201).json({
       user: { id: user._id, name: user.name, email: user.email, role: user.role, isVerified: user.isVerified },
       token,
       refreshToken,
-      verificationLink: `${process.env.BASE_URL || 'http://localhost:3000'}/api/auth/verify?token=${verificationToken}`
+      verificationLink
     });
   } catch (err) {
     res.status(500).json({ message: 'Грешка при регистрация.' });
@@ -140,6 +159,48 @@ router.get('/verify', async (req, res) => {
     res.json({ message: 'Имейлът е успешно верифициран.' });
   } catch (err) {
     res.status(500).json({ message: 'Грешка при верификация.' });
+  }
+});
+
+// POST /api/auth/forgot-password
+router.post('/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ message: 'Липсва имейл.' });
+    const user = await User.findOne({ email });
+    if (!user) return res.status(200).json({ message: 'Ако имейлът съществува, ще получите инструкции.' });
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    user.resetPasswordToken = resetToken;
+    user.resetPasswordExpires = Date.now() + 1000 * 60 * 30; // 30 минути
+    await user.save();
+    // Изпрати email с линк
+    const resetUrl = `${process.env.BASE_URL || 'https://geosolver.bg'}/reset-password?token=${resetToken}`;
+    await sendMail({
+      to: user.email,
+      subject: 'Възстановяване на парола в GeoSolver',
+      html: `<p>Здравей,</p><p>За да смениш паролата си, кликни на линка по-долу:</p><p><a href="${resetUrl}">${resetUrl}</a></p><p>Ако не си искал смяна на паролата, игнорирай този имейл.</p>`
+    });
+    res.json({ message: 'Ако имейлът съществува, ще получите инструкции за възстановяване.' });
+  } catch (err) {
+    res.status(500).json({ message: 'Грешка при заявка за нова парола.' });
+  }
+});
+
+// POST /api/auth/reset-password
+router.post('/reset-password', async (req, res) => {
+  try {
+    const { token, newPassword } = req.body;
+    if (!token || !newPassword) return res.status(400).json({ message: 'Липсва токен или нова парола.' });
+    const user = await User.findOne({ resetPasswordToken: token, resetPasswordExpires: { $gt: Date.now() } });
+    if (!user) return res.status(400).json({ message: 'Невалиден или изтекъл токен.' });
+    user.password = await bcrypt.hash(newPassword, 10);
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpires = undefined;
+    user.refreshTokens = [];
+    await user.save();
+    res.json({ message: 'Паролата е сменена успешно. Моля, влезте с новата парола.' });
+  } catch (err) {
+    res.status(500).json({ message: 'Грешка при смяна на паролата.' });
   }
 });
 
