@@ -10,12 +10,13 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-function sendMail({ to, subject, html }) {
+function sendMail({ to, subject, html, replyTo }) {
   return transporter.sendMail({
-    from: process.env.MAIL_FROM || process.env.SMTP_USER,
+    from: process.env.MAIL_FROM || 'team@geosolver.bg',
     to,
     subject,
     html,
+    replyTo: replyTo || process.env.MAIL_FROM || 'team@geosolver.bg',
   });
 }
 

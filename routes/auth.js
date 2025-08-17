@@ -34,7 +34,7 @@ router.post('/register', async (req, res) => {
     const user = await User.create({ name, email, password: hashed, role: 'free', refreshTokens: [refreshToken], isVerified: false, verificationToken });
     const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '15m' });
     // Изпрати verificationToken по email
-    const verificationLink = `${process.env.BASE_URL || 'http://localhost:3000'}/api/auth/verify?token=${verificationToken}`;
+    const verificationLink = `${process.env.BASE_URL || 'http://localhost:5000'}/api/auth/verify?token=${verificationToken}`;
     await sendMail({
       to: user.email,
       subject: 'Потвърждение на имейл в GeoSolver',
