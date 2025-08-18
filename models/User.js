@@ -10,6 +10,8 @@ const userSchema = new mongoose.Schema({
   verificationToken: { type: String },
   resetPasswordToken: { type: String },
   resetPasswordExpires: { type: Date },
+  googleId: { type: String, sparse: true }, // Google OAuth ID
+  profilePicture: { type: String }, // Profile picture URL
   userPreferences: {
     showToolsInDevelopment: { type: Boolean, default: false }
   }
