@@ -6,6 +6,7 @@ const cors = require("cors");
 const historyRoutes = require("./routes/history");
 const authRoutes = require("./routes/auth");
 const contactRoute = require('./routes/contact');
+const userPreferencesRoutes = require('./routes/userPreferences');
 
 const app = express();
 app.use(cors({
@@ -17,6 +18,7 @@ app.use(express.json());
 app.use("/api/history", historyRoutes);
 app.use("/api/auth", authRoutes);
 app.use('/api/contact', contactRoute);
+app.use('/api/user-preferences', userPreferencesRoutes);
 
 mongoose.connect(process.env.MONGODB_URI, {
     useNewUrlParser: true,
