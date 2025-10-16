@@ -8,6 +8,10 @@ const authRoutes = require("./routes/auth");
 const contactRoute = require('./routes/contact');
 const userPreferencesRoutes = require('./routes/userPreferences');
 const googleAuthRoutes = require('./routes/googleAuth');
+const assignmentRoutes = require('./routes/assignments');
+const studentRoutes = require('./routes/students');
+const classRoutes = require('./routes/classes');
+const submissionRoutes = require('./routes/submissions');
 
 const app = express();
 app.use(cors({
@@ -21,6 +25,10 @@ app.use("/api/auth", authRoutes);
 app.use('/api/contact', contactRoute);
 app.use('/api/user-preferences', userPreferencesRoutes);
 app.use('/api/google-auth', googleAuthRoutes);
+app.use('/api/assignments', assignmentRoutes);
+app.use('/api/students', studentRoutes);
+app.use('/api/classes', classRoutes);
+app.use('/api/submissions', submissionRoutes);
 
 mongoose.connect(process.env.MONGODB_URI, {
     useNewUrlParser: true,
