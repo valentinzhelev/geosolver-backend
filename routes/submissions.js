@@ -4,33 +4,40 @@ const Submission = require('../models/Submission');
 const Assignment = require('../models/Assignment');
 const Student = require('../models/Student');
 const auth = require('../middleware/auth');
-// const multer = require('multer'); // Temporarily disabled due to network issues
+const multer = require('multer');
 const path = require('path');
+const fs = require('fs');
 
-// File upload configuration (temporarily disabled)
-// const storage = multer.diskStorage({
-//   destination: (req, file, cb) => {
-//     cb(null, 'uploads/submissions/');
-//   },
-//   filename: (req, file, cb) => {
-//     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-//     cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
-//   }
-// });
+// Ensure uploads directory exists
+const uploadsDir = 'uploads/submissions/';
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
 
-// const upload = multer({ 
-//   storage: storage,
-//   limits: {
-//     fileSize: 10 * 1024 * 1024 // 10MB limit
-//   },
-//   fileFilter: (req, file, cb) => {
-//     if (file.mimetype.startsWith('image/') || file.mimetype === 'application/pdf') {
-//       cb(null, true);
-//     } else {
-//       cb(new Error('Only image and PDF files are allowed'), false);
-//     }
-//   }
-// });
+// File upload configuration
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadsDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({ 
+  storage: storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024 // 10MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/') || file.mimetype === 'application/pdf') {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image and PDF files are allowed'), false);
+    }
+  }
+});
 
 // Get all submissions for a teacher
 router.get('/', auth, async (req, res) => {
@@ -88,20 +95,24 @@ router.get('/:id', auth, async (req, res) => {
   }
 });
 
-// Submit solution (for students - will be used when student interface is built)
-// Temporarily disabled file upload due to multer dependency
-router.post('/', async (req, res) => {
+// Submit solution with file upload
+router.post('/', upload.array('files', 5), async (req, res) => {
   try {
     const { studentId, assignmentId, teacherId } = req.body;
     
-    // Mock file data for now
-    const files = [{
-      filename: 'mock-file.jpg',
-      originalName: 'solution.jpg',
-      mimetype: 'image/jpeg',
-      size: 1024,
-      path: 'uploads/submissions/mock-file.jpg'
-    }];
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ message: 'No files uploaded' });
+    }
+    
+    // Process uploaded files
+    const files = req.files.map(file => ({
+      filename: file.filename,
+      originalName: file.originalname,
+      mimetype: file.mimetype,
+      size: file.size,
+      path: file.path,
+      uploadedAt: new Date()
+    }));
     
     const submission = new Submission({
       studentId,
@@ -228,6 +239,36 @@ router.get('/stats/overview', auth, async (req, res) => {
   } catch (error) {
     res.status(500).json({ message: 'Error fetching submission stats', error: error.message });
   }
+});
+
+// Serve uploaded files
+router.get('/file/:filename', (req, res) => {
+  const filename = req.params.filename;
+  const filepath = path.join(uploadsDir, filename);
+  
+  if (fs.existsSync(filepath)) {
+    res.sendFile(path.resolve(filepath));
+  } else {
+    res.status(404).json({ message: 'File not found' });
+  }
+});
+
+// Error handling middleware for multer
+router.use((error, req, res, next) => {
+  if (error instanceof multer.MulterError) {
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ message: 'File too large. Maximum size is 10MB.' });
+    }
+    if (error.code === 'LIMIT_FILE_COUNT') {
+      return res.status(400).json({ message: 'Too many files. Maximum is 5 files.' });
+    }
+  }
+  
+  if (error.message === 'Only image and PDF files are allowed') {
+    return res.status(400).json({ message: error.message });
+  }
+  
+  res.status(500).json({ message: 'File upload error', error: error.message });
 });
 
 module.exports = router;
