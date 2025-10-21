@@ -12,6 +12,10 @@ const assignmentRoutes = require('./routes/assignments');
 const studentRoutes = require('./routes/students');
 const classRoutes = require('./routes/classes');
 const submissionRoutes = require('./routes/submissions');
+const plansRoutes = require('./routes/plans');
+const subscriptionsRoutes = require('./routes/subscriptions');
+const paymentsRoutes = require('./routes/payments');
+const calculationsRoutes = require('./routes/calculations');
 
 const app = express();
 app.use(cors({
@@ -29,6 +33,10 @@ app.use('/api/assignments', assignmentRoutes);
 app.use('/api/students', studentRoutes);
 app.use('/api/classes', classRoutes);
 app.use('/api/submissions', submissionRoutes);
+app.use('/api/plans', plansRoutes);
+app.use('/api/subscriptions', subscriptionsRoutes);
+app.use('/api/payments', paymentsRoutes);
+app.use('/api/calculations', calculationsRoutes);
 
 mongoose.connect(process.env.MONGODB_URI, {
     useNewUrlParser: true,

@@ -3,9 +3,10 @@
     "version": "1.0.0",
     "description": "Express API за история на изчисленията",
     "main": "index.js",
-    "scripts": {
-        "start": "node index.js"
-    },
+  "scripts": {
+    "start": "node index.js",
+    "setup": "node setupPlans.js"
+  },
     "dependencies": {
         "bcryptjs": "^3.0.2",
         "cors": "^2.8.5",
