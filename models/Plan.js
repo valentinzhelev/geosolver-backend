@@ -19,7 +19,8 @@ const planSchema = new mongoose.Schema({
     en: { type: String, required: true }
   }],
   limits: {
-    calculationsPerMonth: { type: Number, default: 5 },
+    calculationsPerDay: { type: Number, default: 5 },
+    calculationsPerMonth: { type: Number, default: 150 },
     calculationsPerTool: { type: Number, default: 5 },
     unlimited: { type: Boolean, default: false }
   },

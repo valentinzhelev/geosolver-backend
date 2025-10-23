@@ -167,12 +167,12 @@ router.get('/limits', async (req, res) => {
       });
     }
 
-    const canCalculate = plan.limits.unlimited || todayCalculations < plan.limits.calculationsPerMonth;
+    const canCalculate = plan.limits.unlimited || todayCalculations < plan.limits.calculationsPerDay;
 
     res.json({
       canCalculate,
       used: todayCalculations,
-      limit: plan.limits.calculationsPerMonth,
+      limit: plan.limits.calculationsPerDay,
       unlimited: plan.limits.unlimited,
       planName: plan.name
     });
