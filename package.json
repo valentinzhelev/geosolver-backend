@@ -1,11 +1,15 @@
 {
     "name": "geosolver-backend",
     "version": "1.0.0",
-    "description": "Express API за история на изчисленията",
+    "description": "Express API",
     "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "setup": "node setupPlans.js"
+    "setup": "node setupPlans.js",
+    "seed": "node scripts/seed-teacher-panel.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
   },
     "dependencies": {
         "bcryptjs": "^3.0.2",
@@ -17,6 +21,29 @@
         "mongodb": "^6.16.0",
         "mongoose": "^7.8.7",
         "multer": "^2.0.2",
-        "nodemailer": "^6.9.8"
+        "nodemailer": "^6.9.8",
+        "vm2": "^3.9.19"
+    },
+    "devDependencies": {
+        "jest": "^29.7.0",
+        "supertest": "^6.3.3",
+        "@types/jest": "^29.5.8",
+        "mongodb-memory-server": "^9.1.3"
+    },
+    "jest": {
+        "testEnvironment": "node",
+        "collectCoverageFrom": [
+            "**/*.js",
+            "!node_modules/**",
+            "!coverage/**"
+        ],
+        "coverageThreshold": {
+            "global": {
+                "branches": 70,
+                "functions": 70,
+                "lines": 70,
+                "statements": 70
+            }
+        }
     }
 }

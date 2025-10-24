@@ -17,6 +17,11 @@ const subscriptionsRoutes = require('./routes/subscriptions');
 const paymentsRoutes = require('./routes/payments');
 const calculationsRoutes = require('./routes/calculations');
 
+// Teacher Panel Routes
+const taskTemplateRoutes = require('./routes/taskTemplates');
+const courseRoutes = require('./routes/courses');
+const studentAssignmentRoutes = require('./routes/studentAssignments');
+
 const app = express();
 app.use(cors({
     origin: '*', // или конкретния ти frontend адрес
@@ -37,6 +42,12 @@ app.use('/api/plans', plansRoutes);
 app.use('/api/subscriptions', subscriptionsRoutes);
 app.use('/api/payments', paymentsRoutes);
 app.use('/api/calculations', calculationsRoutes);
+
+// Teacher Panel API Routes
+app.use('/api/teacher/tasks', taskTemplateRoutes);
+app.use('/api/teacher/courses', courseRoutes);
+app.use('/api/teacher/assignments', assignmentRoutes);
+app.use('/api/student/assignments', studentAssignmentRoutes);
 
 mongoose.connect(process.env.MONGODB_URI, {
     useNewUrlParser: true,
