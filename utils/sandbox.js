@@ -1,4 +1,5 @@
-const { VM } = require('vm2');
+// Using Node.js built-in vm module instead of vm2
+const vm = require('vm');
 
 /**
  * Sandbox execution utility for safe JavaScript code execution
@@ -13,50 +14,47 @@ class SandboxExecutor {
   }
 
   /**
-   * Create a secure VM instance
+   * Create a secure VM context
    */
-  createVM() {
-    return new VM({
-      timeout: this.timeout,
-      sandbox: {
-        // Math functions
-        Math,
-        // Date functions
-        Date,
-        // JSON functions
-        JSON,
-        // Basic number functions
-        parseInt,
-        parseFloat,
-        isNaN,
-        isFinite,
-        // Console (optional)
-        ...(this.console && { console }),
-        // Custom allowed functions
-        generateRandom: this.generateRandom.bind(this),
-        calculateDistance: this.calculateDistance.bind(this),
-        calculateAngle: this.calculateAngle.bind(this),
-        // Trigonometric functions
-        sin: Math.sin,
-        cos: Math.cos,
-        tan: Math.tan,
-        asin: Math.asin,
-        acos: Math.acos,
-        atan: Math.atan,
-        atan2: Math.atan2,
-        // Other math functions
-        sqrt: Math.sqrt,
-        pow: Math.pow,
-        abs: Math.abs,
-        round: Math.round,
-        floor: Math.floor,
-        ceil: Math.ceil,
-        min: Math.min,
-        max: Math.max,
-        PI: Math.PI,
-        E: Math.E
-      }
-    });
+  createContext() {
+    return {
+      // Math functions
+      Math,
+      // Date functions
+      Date,
+      // JSON functions
+      JSON,
+      // Basic number functions
+      parseInt,
+      parseFloat,
+      isNaN,
+      isFinite,
+      // Console (optional)
+      ...(this.console && { console }),
+      // Custom allowed functions
+      generateRandom: this.generateRandom.bind(this),
+      calculateDistance: this.calculateDistance.bind(this),
+      calculateAngle: this.calculateAngle.bind(this),
+      // Trigonometric functions
+      sin: Math.sin,
+      cos: Math.cos,
+      tan: Math.tan,
+      asin: Math.asin,
+      acos: Math.acos,
+      atan: Math.atan,
+      atan2: Math.atan2,
+      // Other math functions
+      sqrt: Math.sqrt,
+      pow: Math.pow,
+      abs: Math.abs,
+      round: Math.round,
+      floor: Math.floor,
+      ceil: Math.ceil,
+      min: Math.min,
+      max: Math.max,
+      PI: Math.PI,
+      E: Math.E
+    };
   }
 
   /**
@@ -64,24 +62,29 @@ class SandboxExecutor {
    */
   executeGenerator(script, variantIndex = 0, seed = null) {
     try {
-      const vm = this.createVM();
+      const context = this.createContext();
       
       // Set seed for reproducible results
       if (seed !== null) {
-        vm.run(`
-          Math.random = function() {
-            const x = Math.sin(${seed}) * 10000;
+        context.Math = {
+          ...Math,
+          random: function() {
+            const x = Math.sin(seed) * 10000;
             return x - Math.floor(x);
-          };
-        `);
+          }
+        };
       }
 
       // Execute the generator script
-      const result = vm.run(`
+      const scriptToRun = `
         (function(variantIndex, seed) {
           ${script}
         })(${variantIndex}, ${seed});
-      `);
+      `;
+
+      const result = vm.runInNewContext(scriptToRun, context, {
+        timeout: this.timeout
+      });
 
       return {
         success: true,
@@ -102,14 +105,18 @@ class SandboxExecutor {
    */
   executeSolution(script, inputData) {
     try {
-      const vm = this.createVM();
+      const context = this.createContext();
       
       // Execute the solution script with input data
-      const result = vm.run(`
+      const scriptToRun = `
         (function(inputData) {
           ${script}
         })(${JSON.stringify(inputData)});
-      `);
+      `;
+
+      const result = vm.runInNewContext(scriptToRun, context, {
+        timeout: this.timeout
+      });
 
       return {
         success: true,
