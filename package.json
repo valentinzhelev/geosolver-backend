@@ -12,16 +12,16 @@
     "test:coverage": "jest --coverage"
   },
     "dependencies": {
-        "bcryptjs": "^3.0.2",
+        "bcryptjs": "^2.4.3",
         "cors": "^2.8.5",
-        "dotenv": "^16.5.0",
-        "express": "^4.21.2",
-        "google-auth-library": "^9.0.0",
+        "dotenv": "^16.3.1",
+        "express": "^4.18.2",
+        "google-auth-library": "^9.4.1",
         "jsonwebtoken": "^9.0.2",
-        "mongodb": "^6.16.0",
-        "mongoose": "^7.8.7",
-        "multer": "^2.0.2",
-        "nodemailer": "^6.9.8",
+        "mongodb": "^6.3.0",
+        "mongoose": "^7.6.3",
+        "multer": "^1.4.5-lts.1",
+        "nodemailer": "^6.9.7",
         "vm2": "^3.9.19"
     },
     "devDependencies": {

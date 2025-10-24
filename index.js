@@ -49,6 +49,16 @@ app.use('/api/teacher/courses', courseRoutes);
 app.use('/api/teacher/assignments', assignmentRoutes);
 app.use('/api/student/assignments', studentAssignmentRoutes);
 
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.status(200).json({
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    environment: process.env.NODE_ENV || 'development'
+  });
+});
+
 mongoose.connect(process.env.MONGODB_URI, {
     useNewUrlParser: true,
     useUnifiedTopology: true
