@@ -5,7 +5,7 @@ const path = require('path');
 const uploadsDir = path.join(__dirname, 'uploads', 'submissions');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
-  console.log('✅ Created uploads directory');
+  console.log('✅ Created uploads directory!');
 }
 
 // Create .env file if it doesn't exist
