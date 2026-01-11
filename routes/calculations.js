@@ -46,11 +46,28 @@ router.post('/', async (req, res) => {
 // GET /api/calculations - История на изчисленията
 router.get('/', auth, async (req, res) => {
   try {
-    const { page = 1, limit = 10, toolName } = req.query;
+    const { page = 1, limit = 10, toolName, month, year } = req.query;
     const skip = (page - 1) * limit;
     
     const filter = { userId: req.user.id };
     if (toolName) filter.toolName = toolName;
+    
+    // If month and year are provided, filter by that month
+    // Otherwise, default to current month
+    const now = new Date();
+    const targetMonth = month ? parseInt(month) : now.getMonth();
+    const targetYear = year ? parseInt(year) : now.getFullYear();
+    
+    const startOfMonth = new Date(targetYear, targetMonth, 1);
+    startOfMonth.setHours(0, 0, 0, 0);
+    const endOfMonth = new Date(targetYear, targetMonth + 1, 0);
+    endOfMonth.setHours(23, 59, 59, 999);
+    
+    // Filter by current month by default
+    filter.createdAt = {
+      $gte: startOfMonth,
+      $lte: endOfMonth
+    };
     
     const calculations = await Calculation.find(filter)
       .sort({ createdAt: -1 })
@@ -67,6 +84,10 @@ router.get('/', auth, async (req, res) => {
         total: Math.ceil(total / limit),
         hasNext: skip + calculations.length < total,
         hasPrev: page > 1
+      },
+      period: {
+        start: startOfMonth,
+        end: endOfMonth
       }
     });
   } catch (error) {
@@ -138,43 +159,48 @@ router.get('/limits', async (req, res) => {
       return res.status(500).json({ error: 'Free plan not found' });
     }
 
-    // Count today's calculations
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    // Count this month's calculations (from start of month to end of month)
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    startOfMonth.setHours(0, 0, 0, 0);
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    endOfMonth.setHours(23, 59, 59, 999);
 
-    let todayCalculations = 0;
+    let monthlyCalculations = 0;
     
     if (userId) {
-      // For logged users, count by userId
-      todayCalculations = await Calculation.countDocuments({
+      // For logged users, count by userId for current month
+      monthlyCalculations = await Calculation.countDocuments({
         userId: userId,
         createdAt: {
-          $gte: today,
-          $lt: tomorrow
+          $gte: startOfMonth,
+          $lte: endOfMonth
         }
       });
     } else {
-      // For anonymous users, count by IP
-      todayCalculations = await Calculation.countDocuments({
+      // For anonymous users, count by IP for current month
+      monthlyCalculations = await Calculation.countDocuments({
         userId: null,
         ipAddress: req.ip,
         createdAt: {
-          $gte: today,
-          $lt: tomorrow
+          $gte: startOfMonth,
+          $lte: endOfMonth
         }
       });
     }
 
-    const canCalculate = plan.limits.unlimited || todayCalculations < plan.limits.calculationsPerDay;
+    // For free plan, use calculationsPerMonth, otherwise use calculationsPerDay
+    const limit = plan.limits.calculationsPerMonth || plan.limits.calculationsPerDay || 5;
+    const canCalculate = plan.limits.unlimited || monthlyCalculations < limit;
 
     res.json({
       canCalculate,
-      used: todayCalculations,
-      limit: plan.limits.calculationsPerDay,
+      used: monthlyCalculations,
+      limit: limit,
       unlimited: plan.limits.unlimited,
-      planName: plan.name
+      planName: plan.name,
+      periodStart: startOfMonth,
+      periodEnd: endOfMonth
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
