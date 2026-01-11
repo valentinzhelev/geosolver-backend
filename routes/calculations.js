@@ -81,7 +81,8 @@ router.get('/', auth, async (req, res) => {
       calculations,
       pagination: {
         current: parseInt(page),
-        total: Math.ceil(total / limit),
+        total: Math.ceil(total / limit), // Total pages
+        totalItems: total, // Total number of calculations
         hasNext: skip + calculations.length < total,
         hasPrev: page > 1
       },
