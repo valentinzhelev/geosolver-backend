@@ -41,6 +41,7 @@ function extractFirstTaskData(text) {
     /[αa]lpha?\s*[=:]\s*([\d\s.,]+)/gi,
     /ъгъл\s*[αa]?\s*[=:]\s*([\d\s.,]+)/gi,
     /α\s*[=:]\s*([\d\s.,]+)/gi,
+    /\bd\s*[=:]\s*([\d\s.,]+)/gi,
     /([\d\s.,]+)\s*(?:gon|град[иa]?)/gi
   ];
   for (const p of alphaPatterns) {
