@@ -4,31 +4,61 @@ const { extractTaskInputFromImage } = require('../services/extractionService');
 
 const router = express.Router();
 const storage = multer.memoryStorage();
+const MAX_SIZE = 5 * 1024 * 1024;
+const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
+
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: MAX_SIZE },
   fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith('image/')) {
+    if (ALLOWED_TYPES.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error('Only image files are allowed'));
+      cb(new Error('Only JPG, PNG and WebP images are allowed'));
     }
   }
 });
 
-router.post('/extract-input', upload.single('image'), async (req, res) => {
+const uploadFields = upload.fields([
+  { name: 'image', maxCount: 1 },
+  { name: 'file', maxCount: 1 }
+]);
+
+router.post('/extract-input', (req, res, next) => {
+  uploadFields(req, res, (err) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({ success: false, error: 'Image must be under 5MB' });
+      }
+      if (err.message && err.message.includes('JPG, PNG and WebP')) {
+        return res.status(400).json({ success: false, error: err.message });
+      }
+      return res.status(500).json({ success: false, error: 'Upload failed' });
+    }
+    next();
+  });
+}, async (req, res) => {
   try {
-    if (!req.file || !req.file.buffer) {
+    const f = req.files?.image?.[0] || req.files?.file?.[0];
+    const buffer = f?.buffer;
+
+    if (!buffer || !Buffer.isBuffer(buffer)) {
       return res.status(400).json({
         success: false,
         error: 'No image provided'
       });
     }
 
-    const result = await extractTaskInputFromImage(req.file.buffer);
+    const result = await extractTaskInputFromImage(buffer);
     res.json(result);
   } catch (err) {
-    console.error('Scan extract error:', err);
+    if (err.message && err.message.includes('GCP_SA_JSON')) {
+      return res.status(503).json({
+        success: false,
+        error: 'Scan service not configured'
+      });
+    }
+    console.error('Scan extract error:', err.message);
     res.status(500).json({
       success: false,
       error: err.message || 'Failed to extract data from image'
