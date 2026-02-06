@@ -22,6 +22,7 @@ const usersRoutes = require('./routes/users');
 const taskTemplateRoutes = require('./routes/taskTemplates');
 const courseRoutes = require('./routes/courses');
 const studentAssignmentRoutes = require('./routes/studentAssignments');
+const scanRoutes = require('./routes/scan');
 
 const app = express();
 app.use(cors({
@@ -50,6 +51,7 @@ app.use('/api/teacher/tasks', taskTemplateRoutes);
 app.use('/api/teacher/courses', courseRoutes);
 app.use('/api/teacher/assignments', assignmentRoutes);
 app.use('/api/student/assignments', studentAssignmentRoutes);
+app.use('/api/scan', scanRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
