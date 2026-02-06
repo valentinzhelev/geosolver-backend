@@ -2,7 +2,10 @@ const Tesseract = require('tesseract.js');
 
 function parseNumber(str) {
   if (!str || typeof str !== 'string') return null;
-  const cleaned = str.replace(/\s/g, '').replace(',', '.');
+  let cleaned = str.trim();
+  cleaned = cleaned.replace(/(\d)[\s\u00A0]+(\d{2})\b/g, '$1.$2');
+  cleaned = cleaned.replace(/[\s\u00A0]/g, '');
+  cleaned = cleaned.replace(/[,‚\u060C]/g, '.');
   const num = parseFloat(cleaned);
   return isNaN(num) ? null : num;
 }
@@ -46,8 +49,8 @@ function extractFirstTaskData(text) {
   if (alphaVal !== null && alphaVal >= 0 && alphaVal < 400) result.alpha = alphaVal;
 
   const sVal = tryMatch(normalized, [
-    /\b[Ss5]\s*[=:]\s*([\d\s.,]+)/,
-    /(?:^|\n)\s*[Ss5]\s*[=:]\s*([\d\s.,]+)/,
+    /\b[Ss58]\s*[=:]\s*([\d\s.,]+)/,
+    /(?:^|\n)\s*[Ss58]\s*[=:]\s*([\d\s.,]+)/,
     /дължина\s*S?\s*[=:]\s*([\d\s.,]+)/i,
     /разстояние\s*[=:]\s*([\d\s.,]+)/i,
     /([\d\s.,]+)\s*(?:m|м)\b/
@@ -57,17 +60,30 @@ function extractFirstTaskData(text) {
   const hasAny = result.y1 !== null || result.x1 !== null || result.alpha !== null || result.s !== null;
   if (hasAny) return result;
 
-  const lines = normalized.split(/[\r\n]+/);
+  const lines = normalized.split(/[\r\n]+/).map(l => l.trim()).filter(Boolean);
   for (const line of lines) {
-    const m = line.match(/^\s*([YyVvXxSs5Dd])\s*[=:]\s*([\d\s.,]+)\s*$/);
+    const m = line.match(/^\s*([YyVvXxSs58Dd])\s*[=:]\s*([\d\s.,]+)\s*$/);
     if (m) {
       const letter = m[1].toLowerCase();
       const num = parseNumber(m[2]);
       if (num === null) continue;
       if ((letter === 'y' || letter === 'v') && result.y1 === null) result.y1 = num;
       else if (letter === 'x' && result.x1 === null) result.x1 = num;
-      else if ((letter === 's' || letter === '5') && num > 0 && num < 100000 && result.s === null) result.s = num;
+      else if ((letter === 's' || letter === '5' || letter === '8') && num > 0 && num < 100000 && result.s === null) result.s = num;
       else if (letter === 'd' && num >= 0 && num < 400 && result.alpha === null) result.alpha = num;
+    }
+  }
+
+  if (result.s === null && result.y1 !== null && result.x1 !== null && result.alpha !== null) {
+    for (const line of lines) {
+      const m = line.match(/[=:]\s*([\d\s.,]+)\s*$/);
+      if (m) {
+        const num = parseNumber(m[1]);
+        if (num !== null && num > 1 && num < 10000 && num !== result.y1 && num !== result.x1 && Math.abs(num - result.alpha) > 1) {
+          result.s = num;
+          break;
+        }
+      }
     }
   }
 
