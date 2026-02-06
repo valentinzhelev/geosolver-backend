@@ -46,7 +46,8 @@ function extractFirstTaskData(text) {
   if (alphaVal !== null && alphaVal >= 0 && alphaVal < 400) result.alpha = alphaVal;
 
   const sVal = tryMatch(normalized, [
-    /\bS\s*[=:]\s*([\d\s.,]+)/,
+    /\b[Ss5]\s*[=:]\s*([\d\s.,]+)/,
+    /(?:^|\n)\s*[Ss5]\s*[=:]\s*([\d\s.,]+)/,
     /дължина\s*S?\s*[=:]\s*([\d\s.,]+)/i,
     /разстояние\s*[=:]\s*([\d\s.,]+)/i,
     /([\d\s.,]+)\s*(?:m|м)\b/
@@ -58,14 +59,14 @@ function extractFirstTaskData(text) {
 
   const lines = normalized.split(/[\r\n]+/);
   for (const line of lines) {
-    const m = line.match(/^\s*([YyVvXxSsDd])\s*[=:]\s*([\d\s.,]+)\s*$/);
+    const m = line.match(/^\s*([YyVvXxSs5Dd])\s*[=:]\s*([\d\s.,]+)\s*$/);
     if (m) {
       const letter = m[1].toLowerCase();
       const num = parseNumber(m[2]);
       if (num === null) continue;
       if ((letter === 'y' || letter === 'v') && result.y1 === null) result.y1 = num;
       else if (letter === 'x' && result.x1 === null) result.x1 = num;
-      else if (letter === 's' && num > 0 && num < 100000 && result.s === null) result.s = num;
+      else if ((letter === 's' || letter === '5') && num > 0 && num < 100000 && result.s === null) result.s = num;
       else if (letter === 'd' && num >= 0 && num < 400 && result.alpha === null) result.alpha = num;
     }
   }
