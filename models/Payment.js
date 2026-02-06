@@ -11,7 +11,7 @@ const paymentSchema = new mongoose.Schema({
     ref: 'Subscription' 
   },
   amount: { type: Number, required: true },
-  currency: { type: String, default: 'BGN' },
+  currency: { type: String, default: 'EUR' },
   status: { 
     type: String, 
     enum: ['pending', 'completed', 'failed', 'refunded'], 

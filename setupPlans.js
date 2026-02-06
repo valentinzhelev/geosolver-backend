@@ -32,8 +32,8 @@ const plans = [
       en: 'Professional Plan'
     },
     price: {
-      monthly: 19.99,
-      yearly: 191.90
+      monthly: 9.99,
+      yearly: 95.90
     },
     features: [
       { bg: 'Неограничени изчисления', en: 'Unlimited calculations' },

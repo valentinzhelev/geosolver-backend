@@ -17,6 +17,8 @@ const subscriptionsRoutes = require('./routes/subscriptions');
 const paymentsRoutes = require('./routes/payments');
 const calculationsRoutes = require('./routes/calculations');
 const usersRoutes = require('./routes/users');
+const billingRoutes = require('./routes/billing');
+const webhooksRoutes = require('./routes/webhooks');
 
 // Teacher Panel Routes
 const taskTemplateRoutes = require('./routes/taskTemplates');
@@ -29,6 +31,9 @@ app.use(cors({
     origin: '*',
     credentials: true
 }));
+
+// Stripe webhook needs raw body – must be before express.json()
+app.use('/api/webhooks/stripe', express.raw({ type: 'application/json' }), webhooksRoutes.stripeWebhookHandler);
 app.use(express.json());
 
 app.use("/api/history", historyRoutes);
@@ -52,6 +57,7 @@ app.use('/api/teacher/courses', courseRoutes);
 app.use('/api/teacher/assignments', assignmentRoutes);
 app.use('/api/student/assignments', studentAssignmentRoutes);
 app.use('/api/scan', scanRoutes);
+app.use('/api/billing', billingRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

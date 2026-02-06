@@ -150,6 +150,31 @@ npm start
 
 The API will be available at `http://localhost:5000`
 
+### Stripe Billing (GeoSolver Pro)
+
+Subscriptions use Stripe Checkout + Webhooks + Customer Portal.
+
+**Required env vars:**
+- `STRIPE_SECRET_KEY` – from Dashboard → Developers → API keys
+- `STRIPE_WEBHOOK_SECRET` – from Dashboard → Developers → Webhooks
+- `STRIPE_PRICE_ID_PRO` – Price ID for GeoSolver Pro (e.g. `price_1SxyKkLZGman6fyMjUa3I15z`)
+- `FRONTEND_URL` – e.g. `https://geosolver.bg`
+
+**Webhook URL (Production):**
+```
+https://geosolver-backend-production.up.railway.app/api/webhooks/stripe
+```
+
+**Webhook events:** `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_succeeded`, `invoice.payment_failed`
+
+**Local testing:** Use [Stripe CLI](https://stripe.com/docs/stripe-cli) to forward webhooks:
+```bash
+stripe listen --forward-to localhost:5000/api/webhooks/stripe
+```
+Use the displayed webhook signing secret as `STRIPE_WEBHOOK_SECRET` in `.env`.
+
+**Do NOT commit secrets.** Use Railway Variables or `.env` (gitignored).
+
 ## Database Schema
 
 ### User Model

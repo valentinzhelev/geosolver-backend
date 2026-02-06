@@ -78,9 +78,18 @@ router.post('/login', async (req, res) => {
 // GET /api/auth/account
 router.get('/account', auth, async (req, res) => {
   try {
-    const user = await User.findById(req.userId);
+    const user = await User.findById(req.userId).select('name email role plan subscriptionStatus currentPeriodEnd stripeCustomerId');
     if (!user) return res.status(404).json({ message: 'Потребителят не е намерен.' });
-    res.json({ id: user._id, name: user.name, email: user.email, role: user.role });
+    res.json({
+      id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      plan: user.plan || 'free',
+      subscriptionStatus: user.subscriptionStatus || 'free',
+      currentPeriodEnd: user.currentPeriodEnd,
+      hasBillingCustomer: !!user.stripeCustomerId
+    });
   } catch (err) {
     res.status(500).json({ message: 'Грешка при зареждане на акаунта.' });
   }

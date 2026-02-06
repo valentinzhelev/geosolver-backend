@@ -1,5 +1,7 @@
 const express = require('express');
 const multer = require('multer');
+const auth = require('../middleware/auth');
+const requireActiveSubscription = require('../middleware/requireActiveSubscription');
 const { extractTaskInputFromImage } = require('../services/extractionService');
 
 const router = express.Router();
@@ -24,7 +26,7 @@ const uploadFields = upload.fields([
   { name: 'file', maxCount: 1 }
 ]);
 
-router.post('/extract-input', (req, res, next) => {
+router.post('/extract-input', auth, requireActiveSubscription, (req, res, next) => {
   uploadFields(req, res, (err) => {
     if (err) {
       if (err.code === 'LIMIT_FILE_SIZE') {

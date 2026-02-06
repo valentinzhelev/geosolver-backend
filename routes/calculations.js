@@ -190,15 +190,22 @@ router.get('/limits', async (req, res) => {
       });
     }
 
-    // For free plan, use calculationsPerMonth, otherwise use calculationsPerDay
-    const limit = plan.limits.calculationsPerMonth || plan.limits.calculationsPerDay || 5;
-    const canCalculate = plan.limits.unlimited || monthlyCalculations < limit;
+    // Check if user has Pro (Stripe subscription)
+    let unlimited = plan.limits.unlimited;
+    if (userId) {
+      const user = await User.findById(userId).select('plan subscriptionStatus');
+      if (user?.plan === 'pro' || ['active', 'trialing'].includes(user?.subscriptionStatus)) {
+        unlimited = true;
+      }
+    }
+    const limit = unlimited ? -1 : (plan.limits.calculationsPerMonth || plan.limits.calculationsPerDay || 5);
+    const canCalculate = unlimited || monthlyCalculations < limit;
 
     res.json({
       canCalculate,
       used: monthlyCalculations,
-      limit: limit,
-      unlimited: plan.limits.unlimited,
+      limit: unlimited ? -1 : limit,
+      unlimited,
       planName: plan.name,
       periodStart: startOfMonth,
       periodEnd: endOfMonth

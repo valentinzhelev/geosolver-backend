@@ -5,15 +5,16 @@ const userSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
   role: { type: String, enum: ['student', 'teacher', 'admin'], default: 'student' },
-  currentPlan: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'Plan' 
+  currentPlan: { type: mongoose.Schema.Types.ObjectId, ref: 'Plan' },
+  subscriptionStatus: {
+    type: String,
+    enum: ['free', 'active', 'trialing', 'past_due', 'canceled', 'cancelled', 'incomplete', 'expired'],
+    default: 'free'
   },
-  subscriptionStatus: { 
-    type: String, 
-    enum: ['free', 'active', 'cancelled', 'expired'], 
-    default: 'free' 
-  },
+  stripeCustomerId: { type: String, default: null },
+  stripeSubscriptionId: { type: String, default: null },
+  currentPeriodEnd: { type: Date, default: null },
+  plan: { type: String, enum: ['free', 'pro'], default: 'free' },
   calculationsUsed: { type: Number, default: 0 },
   calculationsLimit: { type: Number, default: 5 },
   lastCalculationReset: { type: Date, default: Date.now },

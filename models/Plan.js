@@ -14,6 +14,8 @@ const planSchema = new mongoose.Schema({
     monthly: { type: Number, default: 0 },
     yearly: { type: Number, default: 0 }
   },
+  stripePriceIdMonthly: { type: String },
+  stripePriceIdYearly: { type: String },
   features: [{
     bg: { type: String, required: true },
     en: { type: String, required: true }
