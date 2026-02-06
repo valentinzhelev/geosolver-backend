@@ -1,4 +1,5 @@
 const { ImageAnnotatorClient } = require('@google-cloud/vision');
+const sharp = require('sharp');
 
 function getVisionClient() {
   const raw = process.env.GCP_SA_JSON;
@@ -150,10 +151,24 @@ function extractFromVisionTokens(tokens) {
   return { result, confidence };
 }
 
+async function preprocessForHandwriting(buffer) {
+  try {
+    return await sharp(buffer)
+      .grayscale()
+      .normalize()
+      .sharpen({ sigma: 0.5 })
+      .toBuffer();
+  } catch {
+    return buffer;
+  }
+}
+
 async function extractTaskInputFromImage(buffer) {
+  const processed = await preprocessForHandwriting(buffer);
   const client = getVisionClient();
   const [response] = await client.documentTextDetection({
-    image: { content: buffer.toString('base64') }
+    image: { content: processed.toString('base64') },
+    imageContext: { languageHints: ['en-t-i0-handwrit'] }
   });
 
   const fullText = response.fullTextAnnotation;
