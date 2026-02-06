@@ -53,6 +53,23 @@ function extractFirstTaskData(text) {
   ]);
   if (sVal !== null && sVal > 0 && sVal < 100000) result.s = sVal;
 
+  const hasAny = result.y1 !== null || result.x1 !== null || result.alpha !== null || result.s !== null;
+  if (hasAny) return result;
+
+  const lines = normalized.split(/[\r\n]+/);
+  for (const line of lines) {
+    const m = line.match(/^\s*([YyVvXxSsDd])\s*[=:]\s*([\d\s.,]+)\s*$/);
+    if (m) {
+      const letter = m[1].toLowerCase();
+      const num = parseNumber(m[2]);
+      if (num === null) continue;
+      if ((letter === 'y' || letter === 'v') && result.y1 === null) result.y1 = num;
+      else if (letter === 'x' && result.x1 === null) result.x1 = num;
+      else if (letter === 's' && num > 0 && num < 100000 && result.s === null) result.s = num;
+      else if (letter === 'd' && num >= 0 && num < 400 && result.alpha === null) result.alpha = num;
+    }
+  }
+
   return result;
 }
 
