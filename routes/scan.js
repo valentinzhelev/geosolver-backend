@@ -4,8 +4,8 @@ const { extractTaskInputFromImage } = require('../services/extractionService');
 
 const router = express.Router();
 const storage = multer.memoryStorage();
-const MAX_SIZE = 5 * 1024 * 1024;
-const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
+const MAX_SIZE = 8 * 1024 * 1024;
+const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg', 'image/heic', 'image/heif'];
 
 const upload = multer({
   storage,
@@ -14,7 +14,7 @@ const upload = multer({
     if (ALLOWED_TYPES.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error('Only JPG, PNG and WebP images are allowed'));
+      cb(new Error('Allow JPG, PNG, WebP, HEIC'));
     }
   }
 });
@@ -28,9 +28,9 @@ router.post('/extract-input', (req, res, next) => {
   uploadFields(req, res, (err) => {
     if (err) {
       if (err.code === 'LIMIT_FILE_SIZE') {
-        return res.status(400).json({ success: false, error: 'Image must be under 5MB' });
+        return res.status(400).json({ success: false, error: 'Image must be under 8MB' });
       }
-      if (err.message && err.message.includes('JPG, PNG and WebP')) {
+      if (err.message && err.message.includes('Allow')) {
         return res.status(400).json({ success: false, error: err.message });
       }
       return res.status(500).json({ success: false, error: 'Upload failed' });

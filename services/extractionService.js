@@ -157,6 +157,7 @@ async function preprocessForHandwriting(buffer) {
       .grayscale()
       .normalize()
       .sharpen({ sigma: 0.5 })
+      .jpeg({ quality: 90 })
       .toBuffer();
   } catch {
     return buffer;
