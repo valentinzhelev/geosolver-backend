@@ -9,68 +9,55 @@ function parseNumber(str) {
 
 function extractFirstTaskData(text) {
   const result = { y1: null, x1: null, alpha: null, s: null };
-  const normalized = text.replace(/\r\n/g, '\n').replace(/[₁₂]/g, '1').replace(/[′'`]/g, "'");
+  let normalized = (text || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/[₁₂]/g, '1')
+    .replace(/[′'`]/g, "'")
+    .replace(/\u0423/g, 'Y')
+    .replace(/\u0443/g, 'y')
+    .replace(/\u0425/g, 'X')
+    .replace(/\u0445/g, 'x');
 
-  const yPatterns = [
-    /Y[1₁]?\s*[=:]\s*([\d\s.,]+)/gi,
-    /Y\s*[=:]\s*([\d\s.,]+)/gi,
-    /координата\s*Y[1₁]?\s*[=:]\s*([\d\s.,]+)/gi
-  ];
-  for (const p of yPatterns) {
-    const m = p.exec(normalized);
-    if (m && m[1]) {
-      const val = parseNumber(m[1]);
-      if (val !== null) { result.y1 = val; break; }
+  function tryMatch(str, patterns) {
+    for (const p of patterns) {
+      const m = str.match(p);
+      if (m && m[1]) return parseNumber(m[1]);
     }
+    return null;
   }
 
-  const xPatterns = [
-    /X[1₁]?\s*[=:]\s*([\d\s.,]+)/gi,
-    /X\s*[=:]\s*([\d\s.,]+)/gi,
-    /координата\s*X[1₁]?\s*[=:]\s*([\d\s.,]+)/gi
-  ];
-  for (const p of xPatterns) {
-    const m = p.exec(normalized);
-    if (m && m[1]) {
-      const val = parseNumber(m[1]);
-      if (val !== null) { result.x1 = val; break; }
-    }
-  }
+  result.y1 = tryMatch(normalized, [
+    /[Yy][1₁]?\s*[=:]\s*([\d\s.,]+)/,
+    /\b[Yy]\s*[=:]\s*([\d\s.,]+)/
+  ]);
 
-  const alphaPatterns = [
-    /[αa]lpha?\s*[=:]\s*([\d\s.,]+)/gi,
-    /ъгъл\s*[αa]?\s*[=:]\s*([\d\s.,]+)/gi,
-    /α\s*[=:]\s*([\d\s.,]+)/gi,
-    /\bd\s*[=:]\s*([\d\s.,]+)/gi,
-    /([\d\s.,]+)\s*(?:gon|град[иa]?)/gi
-  ];
-  for (const p of alphaPatterns) {
-    const m = p.exec(normalized);
-    if (m && m[1]) {
-      const val = parseNumber(m[1]);
-      if (val !== null && val >= 0 && val < 400) { result.alpha = val; break; }
-    }
-  }
+  result.x1 = tryMatch(normalized, [
+    /[Xx][1₁]?\s*[=:]\s*([\d\s.,]+)/,
+    /\b[Xx]\s*[=:]\s*([\d\s.,]+)/
+  ]);
 
-  const sPatterns = [
-    /S\s*[=:]\s*([\d\s.,]+)/gi,
-    /дължина\s*S?\s*[=:]\s*([\d\s.,]+)/gi,
-    /разстояние\s*[=:]\s*([\d\s.,]+)/gi,
-    /([\d\s.,]+)\s*(?:m|м)\b/gi
-  ];
-  for (const p of sPatterns) {
-    const m = p.exec(normalized);
-    if (m && m[1]) {
-      const val = parseNumber(m[1]);
-      if (val !== null && val > 0 && val < 100000) { result.s = val; break; }
-    }
-  }
+  const alphaVal = tryMatch(normalized, [
+    /[αa]lpha?\s*[=:]\s*([\d\s.,]+)/i,
+    /ъгъл\s*[αa]?\s*[=:]\s*([\d\s.,]+)/i,
+    /α\s*[=:]\s*([\d\s.,]+)/,
+    /\bd\s*[=:]\s*([\d\s.,]+)/,
+    /([\d\s.,]+)\s*(?:gon|град[иa]?)/i
+  ]);
+  if (alphaVal !== null && alphaVal >= 0 && alphaVal < 400) result.alpha = alphaVal;
+
+  const sVal = tryMatch(normalized, [
+    /\bS\s*[=:]\s*([\d\s.,]+)/,
+    /дължина\s*S?\s*[=:]\s*([\d\s.,]+)/i,
+    /разстояние\s*[=:]\s*([\d\s.,]+)/i,
+    /([\d\s.,]+)\s*(?:m|м)\b/
+  ]);
+  if (sVal !== null && sVal > 0 && sVal < 100000) result.s = sVal;
 
   return result;
 }
 
 async function extractTaskInputFromImage(buffer) {
-  const { data: { text } } = await Tesseract.recognize(buffer, 'bul+eng', {
+  const { data: { text } } = await Tesseract.recognize(buffer, 'eng', {
     logger: () => {}
   });
 
