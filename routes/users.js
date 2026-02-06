@@ -4,7 +4,7 @@ const User = require('../models/User');
 const auth = require('../middleware/auth');
 const requireRole = require('../middleware/role');
 
-// GET /api/users - Списък на всички потребители (admin only)
+// GET /api/users - List all users (admin only)
 router.get('/', auth, requireRole('admin'), async (req, res) => {
   try {
     const { page = 1, limit = 50, search = '', role = '' } = req.query;
@@ -47,7 +47,7 @@ router.get('/', auth, requireRole('admin'), async (req, res) => {
   }
 });
 
-// GET /api/users/:id - Детайли за конкретен потребител (admin only)
+// GET /api/users/:id - User details (admin only)
 router.get('/:id', auth, requireRole('admin'), async (req, res) => {
   try {
     const user = await User.findById(req.params.id)
@@ -64,7 +64,7 @@ router.get('/:id', auth, requireRole('admin'), async (req, res) => {
   }
 });
 
-// PUT /api/users/:id/role - Промяна на роля на потребител (admin only)
+// PUT /api/users/:id/role - Change user role (admin only)
 router.put('/:id/role', auth, requireRole('admin'), async (req, res) => {
   try {
     const { role } = req.body;
@@ -98,7 +98,7 @@ router.put('/:id/role', auth, requireRole('admin'), async (req, res) => {
   }
 });
 
-// DELETE /api/users/:id - Изтриване на потребител (admin only)
+// DELETE /api/users/:id - Delete user (admin only)
 router.delete('/:id', auth, requireRole('admin'), async (req, res) => {
   try {
     // Prevent admin from deleting themselves

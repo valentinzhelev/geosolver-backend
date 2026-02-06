@@ -11,14 +11,14 @@ const Audit = require('../models/Audit');
 
 const seedTeacherPanel = async () => {
   try {
-    console.log('🌱 Starting teacher panel seed...');
+    console.log('Starting teacher panel seed...');
 
     // Connect to MongoDB
     await mongoose.connect(process.env.MONGODB_URI, {
       useNewUrlParser: true,
       useUnifiedTopology: true
     });
-    console.log('✅ Connected to MongoDB');
+    console.log('Connected to MongoDB');
 
     // Clear existing data
     await User.deleteMany({ email: { $in: ['teacher@example.com', 'student1@example.com', 'student2@example.com', 'student3@example.com'] } });
@@ -27,7 +27,7 @@ const seedTeacherPanel = async () => {
     await Assignment.deleteMany({ title: { $regex: /^Test/ } });
     await Submission.deleteMany({});
     await Audit.deleteMany({});
-    console.log('🧹 Cleared existing data');
+    console.log('Cleared existing data');
 
     // Create teacher user
     const teacher = new User({
@@ -38,7 +38,7 @@ const seedTeacherPanel = async () => {
       isVerified: true
     });
     await teacher.save();
-    console.log('👨‍🏫 Created teacher user');
+    console.log('Created teacher user');
 
     // Create student users
     const students = [];
@@ -59,7 +59,7 @@ const seedTeacherPanel = async () => {
       await student.save();
       students.push(student);
     }
-    console.log('👥 Created student users');
+    console.log('Created student users');
 
     // Create courses
     const course1 = new Course({
@@ -89,7 +89,7 @@ const seedTeacherPanel = async () => {
       }
     });
     await course2.save();
-    console.log('📚 Created courses');
+    console.log('Created courses');
 
     // Create task templates
     const template1 = new TaskTemplate({
@@ -199,7 +199,7 @@ const seedTeacherPanel = async () => {
       isPublic: false
     });
     await template2.save();
-    console.log('📝 Created task templates');
+    console.log('Created task templates');
 
     // Create assignments
     const assignment1 = new Assignment({
@@ -252,7 +252,7 @@ const seedTeacherPanel = async () => {
     await assignment2.save();
     await assignment2.generateVariants();
     await assignment2.save();
-    console.log('📋 Created assignments');
+    console.log('Created assignments');
 
     // Create sample submissions
     const submissions = [];
@@ -323,7 +323,7 @@ const seedTeacherPanel = async () => {
     });
     await lateSubmission.save();
     submissions.push(lateSubmission);
-    console.log('📊 Created sample submissions');
+    console.log('Created sample submissions');
 
     // Create audit entries
     const auditEntries = [
@@ -353,7 +353,7 @@ const seedTeacherPanel = async () => {
     for (const auditData of auditEntries) {
       await Audit.logOperation(auditData);
     }
-    console.log('📝 Created audit entries');
+    console.log('Created audit entries');
 
     // Update assignment statistics
     assignment1.statistics.totalSubmissions = submissions.filter(s => s.assignment.equals(assignment1._id)).length;
@@ -362,25 +362,25 @@ const seedTeacherPanel = async () => {
       .reduce((sum, s) => sum + s.finalScore, 0) / submissions.filter(s => s.assignment.equals(assignment1._id)).length;
     await assignment1.save();
 
-    console.log('✅ Teacher panel seed completed successfully!');
-    console.log('\n📊 Summary:');
-    console.log(`👨‍🏫 Teacher: ${teacher.name} (${teacher.email})`);
-    console.log(`👥 Students: ${students.length}`);
-    console.log(`📚 Courses: 2`);
-    console.log(`📝 Templates: 2`);
-    console.log(`📋 Assignments: 2`);
-    console.log(`📊 Submissions: ${submissions.length}`);
-    console.log(`📝 Audit entries: ${auditEntries.length}`);
-    console.log('\n🔑 Test credentials:');
+    console.log('Teacher panel seed completed successfully!');
+    console.log('\nSummary:');
+    console.log(`Teacher: ${teacher.name} (${teacher.email})`);
+    console.log(`Students: ${students.length}`);
+    console.log(`Courses: 2`);
+    console.log(`Templates: 2`);
+    console.log(`Assignments: 2`);
+    console.log(`Submissions: ${submissions.length}`);
+    console.log(`Audit entries: ${auditEntries.length}`);
+    console.log('\nTest credentials:');
     console.log('Teacher: teacher@example.com / password');
     console.log('Students: student1@example.com, student2@example.com, student3@example.com / password');
 
   } catch (error) {
-    console.error('❌ Error seeding teacher panel:', error);
+    console.error('Error seeding teacher panel:', error);
     throw error;
   } finally {
     await mongoose.disconnect();
-    console.log('🔌 Disconnected from MongoDB');
+    console.log('Disconnected from MongoDB');
   }
 };
 
@@ -388,11 +388,11 @@ const seedTeacherPanel = async () => {
 if (require.main === module) {
   seedTeacherPanel()
     .then(() => {
-      console.log('🎉 Seed completed successfully!');
+      console.log('Seed completed successfully!');
       process.exit(0);
     })
     .catch((error) => {
-      console.error('💥 Seed failed:', error);
+      console.error('Seed failed:', error);
       process.exit(1);
     });
 }

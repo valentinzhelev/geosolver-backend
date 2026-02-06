@@ -5,7 +5,7 @@ const User = require('../models/User');
 const Plan = require('../models/Plan');
 const auth = require('../middleware/auth');
 
-// GET /api/subscriptions - Моите абонаменти
+// GET /api/subscriptions - My subscriptions
 router.get('/', auth, async (req, res) => {
   try {
     const subscriptions = await Subscription.find({ userId: req.user.id })
@@ -17,7 +17,7 @@ router.get('/', auth, async (req, res) => {
   }
 });
 
-// GET /api/subscriptions/current - Текущ абонамент
+// GET /api/subscriptions/current - Current subscription
 router.get('/current', auth, async (req, res) => {
   try {
     const subscription = await Subscription.findOne({ 
@@ -35,24 +35,24 @@ router.get('/current', auth, async (req, res) => {
   }
 });
 
-// POST /api/subscriptions - Създаване на абонамент
+// POST /api/subscriptions - Create subscription
 router.post('/', auth, async (req, res) => {
   try {
     const { planId, billingCycle } = req.body;
     
-    // Проверка дали планът съществува
+    // Check if plan exists
     const plan = await Plan.findById(planId);
     if (!plan) {
       return res.status(404).json({ error: 'Plan not found' });
     }
     
-    // Деактивиране на стари абонаменти
+    // Deactivate old subscriptions
     await Subscription.updateMany(
       { userId: req.user.id, status: 'active' },
       { status: 'cancelled' }
     );
     
-    // Изчисляване на дати
+    // Calculate dates
     const startDate = new Date();
     const endDate = new Date();
     if (billingCycle === 'yearly') {
@@ -61,7 +61,7 @@ router.post('/', auth, async (req, res) => {
       endDate.setMonth(endDate.getMonth() + 1);
     }
     
-    // Създаване на нов абонамент
+    // Create new subscription
     const subscription = new Subscription({
       userId: req.user.id,
       planId,
@@ -73,7 +73,7 @@ router.post('/', auth, async (req, res) => {
     
     await subscription.save();
     
-    // Обновяване на потребителя
+    // Update user
     await User.findByIdAndUpdate(req.user.id, {
       currentPlan: planId,
       subscriptionStatus: 'active',
@@ -86,7 +86,7 @@ router.post('/', auth, async (req, res) => {
   }
 });
 
-// PUT /api/subscriptions/:id/cancel - Отмяна на абонамент
+// PUT /api/subscriptions/:id/cancel - Cancel subscription
 router.put('/:id/cancel', auth, async (req, res) => {
   try {
     const subscription = await Subscription.findOne({
@@ -102,7 +102,7 @@ router.put('/:id/cancel', auth, async (req, res) => {
     subscription.autoRenew = false;
     await subscription.save();
     
-    // Обновяване на потребителя
+    // Update user
     await User.findByIdAndUpdate(req.user.id, {
       subscriptionStatus: 'cancelled'
     });

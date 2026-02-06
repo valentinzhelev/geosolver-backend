@@ -79,23 +79,23 @@ async function setupPlans() {
       useUnifiedTopology: true
     });
     
-    console.log('✅ Connected to MongoDB');
+    console.log('Connected to MongoDB');
     
     // Clear existing plans
     await Plan.deleteMany({});
-    console.log('🗑️ Cleared existing plans');
+    console.log('Cleared existing plans');
     
     // Insert new plans
     for (const planData of plans) {
       const plan = new Plan(planData);
       await plan.save();
-      console.log(`✅ Created plan: ${planData.displayName.en}`);
+      console.log(`Created plan: ${planData.displayName.en}`);
     }
     
-    console.log('🎉 All plans created successfully!');
+    console.log('All plans created successfully!');
     process.exit(0);
   } catch (error) {
-    console.error('❌ Error setting up plans:', error);
+    console.error('Error setting up plans:', error);
     process.exit(1);
   }
 }

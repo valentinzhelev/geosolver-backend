@@ -1,11 +1,11 @@
 /**
- * Скрипт за задаване на администраторска роля на потребител
+ * Script to assign administrator role to a user
  * 
- * Използване:
+ * Usage:
  * node scripts/make-admin.js <email>
  * 
- * Пример:
- * node scripts/make-admin.js valentin.jelev@abv.bg
+ * Example:
+ * node scripts/make-admin.js user@example.com
  */
 
 require('dotenv').config();
@@ -17,7 +17,7 @@ async function makeAdmin() {
     const email = process.argv[2];
     
     if (!email) {
-      console.error('❌ Моля, предоставете имейл адрес:');
+      console.error('Please provide email address:');
       console.log('   node scripts/make-admin.js <email>');
       process.exit(1);
     }
@@ -27,31 +27,31 @@ async function makeAdmin() {
       useUnifiedTopology: true
     });
 
-    console.log('✅ Свързан с MongoDB');
+    console.log('Connected to MongoDB');
 
     const user = await User.findOne({ email });
     
     if (!user) {
-      console.error(`❌ Потребител с имейл "${email}" не е намерен.`);
+      console.error(`User with email "${email}" not found.`);
       process.exit(1);
     }
 
     if (user.role === 'admin') {
-      console.log(`ℹ️  Потребителят "${user.name}" (${user.email}) вече е администратор.`);
+      console.log(`User "${user.name}" (${user.email}) is already an administrator.`);
       process.exit(0);
     }
 
     user.role = 'admin';
     await user.save();
 
-    console.log(`✅ Потребителят "${user.name}" (${user.email}) е направен администратор.`);
-    console.log(`   Стара роля: ${user.role === 'admin' ? 'admin' : 'не-admin'}`);
-    console.log(`   Нова роля: admin`);
+    console.log(`User "${user.name}" (${user.email}) has been made administrator.`);
+    console.log(`   Old role: ${user.role === 'admin' ? 'admin' : 'non-admin'}`);
+    console.log(`   New role: admin`);
 
     await mongoose.disconnect();
     process.exit(0);
   } catch (error) {
-    console.error('❌ Грешка:', error);
+    console.error('Error:', error);
     process.exit(1);
   }
 }

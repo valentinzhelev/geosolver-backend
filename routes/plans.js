@@ -3,7 +3,7 @@ const router = express.Router();
 const Plan = require('../models/Plan');
 const auth = require('../middleware/auth');
 
-// GET /api/plans - Всички планове
+// GET /api/plans - All plans
 router.get('/', async (req, res) => {
   try {
     const plans = await Plan.find({ isActive: true }).sort({ price: 1 });
@@ -13,7 +13,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-// GET /api/plans/:id - Конкретен план
+// GET /api/plans/:id - Specific plan
 router.get('/:id', async (req, res) => {
   try {
     const plan = await Plan.findById(req.params.id);
@@ -26,7 +26,7 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// POST /api/plans - Създаване на план (admin only)
+// POST /api/plans - Create plan (admin only)
 router.post('/', auth, async (req, res) => {
   try {
     if (req.user.role !== 'admin') {

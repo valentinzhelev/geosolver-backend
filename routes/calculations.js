@@ -4,7 +4,7 @@ const Calculation = require('../models/Calculation');
 const User = require('../models/User');
 const auth = require('../middleware/auth');
 
-// POST /api/calculations - Записване на изчисление
+// POST /api/calculations - Save calculation
 router.post('/', async (req, res) => {
   try {
     const { toolName, toolDisplayName, inputData, resultData, calculationTime } = req.body;
@@ -23,7 +23,7 @@ router.post('/', async (req, res) => {
       }
     }
     
-    // Записване на изчислението
+    // Save calculation
     const calculation = new Calculation({
       userId: userId, // Can be null for anonymous users
       toolName,
@@ -43,7 +43,7 @@ router.post('/', async (req, res) => {
   }
 });
 
-// GET /api/calculations - История на изчисленията
+// GET /api/calculations - Calculation history
 router.get('/', auth, async (req, res) => {
   try {
     const { page = 1, limit = 10, toolName, month, year } = req.query;
@@ -73,7 +73,7 @@ router.get('/', auth, async (req, res) => {
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit))
-      .select('-inputData -resultData'); // Не включваме големите данни
+      .select('-inputData -resultData');
     
     const total = await Calculation.countDocuments(filter);
     
@@ -96,7 +96,7 @@ router.get('/', auth, async (req, res) => {
   }
 });
 
-// GET /api/calculations/stats - Статистики за изчисления
+// GET /api/calculations/stats - Calculation statistics
 router.get('/stats', auth, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
@@ -104,17 +104,17 @@ router.get('/stats', auth, async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
     
-    // Общ брой изчисления
+    // Total calculations count
     const totalCalculations = await Calculation.countDocuments({ userId: req.user.id });
     
-    // Изчисления за този месец
+    // Calculations for this month
     const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
     const monthlyCalculations = await Calculation.countDocuments({
       userId: req.user.id,
       createdAt: { $gte: startOfMonth }
     });
     
-    // Изчисления по инструменти
+    // Calculations by tool
     const calculationsByTool = await Calculation.aggregate([
       { $match: { userId: req.user._id } },
       { $group: { _id: '$toolName', count: { $sum: 1 } } },
@@ -136,7 +136,7 @@ router.get('/stats', auth, async (req, res) => {
   }
 });
 
-// GET /api/calculations/limits - Проверка на лимити
+// GET /api/calculations/limits - Check limits
 router.get('/limits', async (req, res) => {
   try {
     const token = req.header('Authorization')?.replace('Bearer ', '');

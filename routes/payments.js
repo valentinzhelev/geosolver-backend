@@ -4,7 +4,7 @@ const Payment = require('../models/Payment');
 const User = require('../models/User');
 const auth = require('../middleware/auth');
 
-// GET /api/payments - История на плащанията
+// GET /api/payments - Payment history
 router.get('/', auth, async (req, res) => {
   try {
     const { page = 1, limit = 10 } = req.query;
@@ -31,7 +31,7 @@ router.get('/', auth, async (req, res) => {
   }
 });
 
-// GET /api/payments/stats - Статистики за плащания
+// GET /api/payments/stats - Payment statistics
 router.get('/stats', auth, async (req, res) => {
   try {
     const totalSpent = await Payment.aggregate([
@@ -59,7 +59,7 @@ router.get('/stats', auth, async (req, res) => {
   }
 });
 
-// POST /api/payments - Създаване на плащане
+// POST /api/payments - Create payment
 router.post('/', auth, async (req, res) => {
   try {
     const { amount, currency, paymentMethod, subscriptionId, description } = req.body;
@@ -81,7 +81,7 @@ router.post('/', auth, async (req, res) => {
   }
 });
 
-// PUT /api/payments/:id/status - Обновяване на статус на плащане
+// PUT /api/payments/:id/status - Update payment status
 router.put('/:id/status', auth, async (req, res) => {
   try {
     const { status, failureReason } = req.body;

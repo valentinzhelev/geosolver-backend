@@ -5,7 +5,7 @@ const path = require('path');
 const uploadsDir = path.join(__dirname, 'uploads', 'submissions');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
-  console.log('✅ Created uploads directory!');
+  console.log('Created uploads directory!');
 }
 
 // Create .env file if it doesn't exist
@@ -33,11 +33,11 @@ GOOGLE_CLIENT_SECRET=your-google-client-secret
 `;
   
   fs.writeFileSync(envPath, envContent);
-  console.log('✅ Created .env file - please update with your actual values');
+  console.log('Created .env file - please update with your actual values');
 }
 
-console.log('🚀 Backend setup complete!');
-console.log('📝 Next steps:');
+console.log('Backend setup complete!');
+console.log('Next steps:');
 console.log('1. Update .env file with your MongoDB URI and email credentials');
 console.log('2. Run: npm install');
 console.log('3. Run: npm start');
