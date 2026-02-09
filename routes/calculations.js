@@ -52,22 +52,22 @@ router.get('/', auth, async (req, res) => {
     const filter = { userId: req.user.id };
     if (toolName) filter.toolName = toolName;
     
-    // If month and year are provided, filter by that month
-    // Otherwise, default to current month
-    const now = new Date();
-    const targetMonth = month ? parseInt(month) : now.getMonth();
-    const targetYear = year ? parseInt(year) : now.getFullYear();
-    
-    const startOfMonth = new Date(targetYear, targetMonth, 1);
-    startOfMonth.setHours(0, 0, 0, 0);
-    const endOfMonth = new Date(targetYear, targetMonth + 1, 0);
-    endOfMonth.setHours(23, 59, 59, 999);
-    
-    // Filter by current month by default
-    filter.createdAt = {
-      $gte: startOfMonth,
-      $lte: endOfMonth
-    };
+    // Filter by month only when requested
+    if (month != null || year != null) {
+      const now = new Date();
+      const targetMonth = month != null ? parseInt(month) : now.getMonth();
+      const targetYear = year != null ? parseInt(year) : now.getFullYear();
+      
+      const startOfMonth = new Date(targetYear, targetMonth, 1);
+      startOfMonth.setHours(0, 0, 0, 0);
+      const endOfMonth = new Date(targetYear, targetMonth + 1, 0);
+      endOfMonth.setHours(23, 59, 59, 999);
+      
+      filter.createdAt = {
+        $gte: startOfMonth,
+        $lte: endOfMonth
+      };
+    }
     
     const calculations = await Calculation.find(filter)
       .sort({ createdAt: -1 })
@@ -85,10 +85,6 @@ router.get('/', auth, async (req, res) => {
         totalItems: total, // Total number of calculations
         hasNext: skip + calculations.length < total,
         hasPrev: page > 1
-      },
-      period: {
-        start: startOfMonth,
-        end: endOfMonth
       }
     });
   } catch (error) {
@@ -160,33 +156,18 @@ router.get('/limits', async (req, res) => {
       return res.status(500).json({ error: 'Free plan not found' });
     }
 
-    // Count this month's calculations (from start of month to end of month)
-    const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    startOfMonth.setHours(0, 0, 0, 0);
-    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    endOfMonth.setHours(23, 59, 59, 999);
-
-    let monthlyCalculations = 0;
+    let totalCalculations = 0;
     
     if (userId) {
-      // For logged users, count by userId for current month
-      monthlyCalculations = await Calculation.countDocuments({
-        userId: userId,
-        createdAt: {
-          $gte: startOfMonth,
-          $lte: endOfMonth
-        }
+      // For logged users, count all-time calculations
+      totalCalculations = await Calculation.countDocuments({
+        userId: userId
       });
     } else {
-      // For anonymous users, count by IP for current month
-      monthlyCalculations = await Calculation.countDocuments({
+      // For anonymous users, count all-time by IP
+      totalCalculations = await Calculation.countDocuments({
         userId: null,
-        ipAddress: req.ip,
-        createdAt: {
-          $gte: startOfMonth,
-          $lte: endOfMonth
-        }
+        ipAddress: req.ip
       });
     }
 
@@ -199,16 +180,14 @@ router.get('/limits', async (req, res) => {
       }
     }
     const limit = unlimited ? -1 : (plan.limits.calculationsPerMonth || plan.limits.calculationsPerDay || 5);
-    const canCalculate = unlimited || monthlyCalculations < limit;
+    const canCalculate = unlimited || totalCalculations < limit;
 
     res.json({
       canCalculate,
-      used: monthlyCalculations,
+      used: totalCalculations,
       limit: unlimited ? -1 : limit,
       unlimited,
-      planName: plan.name,
-      periodStart: startOfMonth,
-      periodEnd: endOfMonth
+      planName: plan.name
     });
   } catch (error) {
     res.status(500).json({ error: error.message });

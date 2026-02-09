@@ -26,7 +26,7 @@ router.get('/current', auth, async (req, res) => {
     }).populate('planId');
     
     if (!subscription) {
-      return res.json({ plan: null, subscription: null });
+      return res.status(404).json({ error: 'No active subscription' });
     }
     
     res.json(subscription);

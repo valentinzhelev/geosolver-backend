@@ -74,4 +74,98 @@ router.post('/create-portal-session', auth, async (req, res) => {
   }
 });
 
+// GET /api/billing/summary (AUTH REQUIRED)
+router.get('/summary', auth, async (req, res) => {
+  if (!stripe) {
+    return res.status(503).json({ error: 'Billing is not configured' });
+  }
+  try {
+    const user = await User.findById(req.userId).select('email stripeCustomerId stripeSubscriptionId plan subscriptionStatus currentPeriodEnd');
+    if (!user?.stripeCustomerId) {
+      return res.json({
+        user: {
+          plan: user?.plan || 'free',
+          subscriptionStatus: user?.subscriptionStatus || 'free',
+          currentPeriodEnd: user?.currentPeriodEnd || null
+        },
+        customer: null,
+        subscription: null,
+        paymentMethod: null,
+        invoices: []
+      });
+    }
+
+    const customer = await stripe.customers.retrieve(user.stripeCustomerId, {
+      expand: ['invoice_settings.default_payment_method']
+    });
+
+    let subscription = null;
+    if (user.stripeSubscriptionId) {
+      subscription = await stripe.subscriptions.retrieve(user.stripeSubscriptionId, {
+        expand: ['default_payment_method']
+      });
+    } else {
+      const list = await stripe.subscriptions.list({
+        customer: user.stripeCustomerId,
+        status: 'all',
+        limit: 1,
+        expand: ['data.default_payment_method']
+      });
+      subscription = list.data?.[0] || null;
+    }
+
+    const paymentMethod =
+      subscription?.default_payment_method ||
+      customer?.invoice_settings?.default_payment_method ||
+      null;
+
+    const invoices = await stripe.invoices.list({
+      customer: user.stripeCustomerId,
+      limit: 10
+    });
+
+    res.json({
+      user: {
+        plan: user.plan,
+        subscriptionStatus: user.subscriptionStatus,
+        currentPeriodEnd: user.currentPeriodEnd
+      },
+      customer: customer ? { id: customer.id, email: customer.email } : null,
+      subscription: subscription
+        ? {
+            id: subscription.id,
+            status: subscription.status,
+            cancelAtPeriodEnd: subscription.cancel_at_period_end,
+            currentPeriodStart: subscription.current_period_start ? new Date(subscription.current_period_start * 1000) : null,
+            currentPeriodEnd: subscription.current_period_end ? new Date(subscription.current_period_end * 1000) : null
+          }
+        : null,
+      paymentMethod: paymentMethod
+        ? {
+            brand: paymentMethod.card?.brand || null,
+            last4: paymentMethod.card?.last4 || null,
+            expMonth: paymentMethod.card?.exp_month || null,
+            expYear: paymentMethod.card?.exp_year || null
+          }
+        : null,
+      invoices: (invoices.data || []).map(inv => ({
+        id: inv.id,
+        status: inv.status,
+        amountPaid: inv.amount_paid,
+        amountDue: inv.amount_due,
+        currency: inv.currency,
+        created: inv.created,
+        hostedInvoiceUrl: inv.hosted_invoice_url,
+        invoicePdf: inv.invoice_pdf,
+        description: inv.description,
+        periodStart: inv.period_start,
+        periodEnd: inv.period_end
+      }))
+    });
+  } catch (err) {
+    console.error('Billing summary error:', err.message);
+    res.status(500).json({ error: err.message || 'Failed to fetch billing summary' });
+  }
+});
+
 module.exports = router;
