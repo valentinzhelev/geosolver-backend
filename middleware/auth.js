@@ -8,6 +8,7 @@ module.exports = function (req, res, next) {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.userId = decoded.id;
     req.userRole = decoded.role;
+    req.user = { id: decoded.id, role: decoded.role };
     next();
   } catch (err) {
     return res.status(401).json({ message: 'Невалиден токен.' });
