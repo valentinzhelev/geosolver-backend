@@ -35,7 +35,7 @@ router.post('/create-checkout-session', auth, async (req, res) => {
 
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
-      payment_method_types: ['card'],
+      payment_method_types: ['card', 'paypal', 'revolut_pay'],
       allow_promotion_codes: true,
       line_items: [{ price: PRICE_ID_PRO, quantity: 1 }],
       success_url: `${FRONTEND_URL}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
