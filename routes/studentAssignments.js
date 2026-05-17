@@ -10,6 +10,18 @@ const Audit = require('../models/Audit');
 const { includesId } = require('../utils/objectId');
 const { getStudentAssignmentStatus } = require('../utils/studentAssignmentStatus');
 const { createNotification } = require('../utils/notifications');
+const {
+  buildSubmissionGaiInsights,
+  buildStudentGaiFeedback,
+  buildAnonymousClassContext,
+  resolveToolKey,
+} = require('../utils/gaiInsights');
+const {
+  enrichStudentFeedback,
+  ensureSubmissionGaiLlm,
+  getStudyHintForAssignment,
+  isLlmEnabled,
+} = require('../utils/gaiLlmService');
 const User = require('../models/User');
 
 // Get assignments for student
@@ -103,6 +115,55 @@ router.get('/assignments/:id', auth, requireRole('student'), async (req, res) =>
     }).sort({ submittedAt: -1 });
     const submission = submissions[0] || null;
     const studentStatus = getStudentAssignmentStatus(assignment, submissions);
+    const toolKey = resolveToolKey(assignment.taskTemplate);
+    const allSubs = await Submission.find({ assignment: assignment._id }).select(
+      'answers rawComparison finalScore variantIndex'
+    );
+    const classContext = buildAnonymousClassContext({ submissions: allSubs, toolKey });
+    let gaiFeedback = null;
+    if (submission?.rawComparison) {
+      const gai = buildSubmissionGaiInsights({
+        submission,
+        toolKey,
+        tolerance:
+          assignment.settings?.customTolerance ??
+          assignment.taskTemplate?.gradingSettings?.tolerance,
+        toleranceType:
+          assignment.settings?.customToleranceType ??
+          assignment.taskTemplate?.gradingSettings?.toleranceType,
+      });
+      gaiFeedback = buildStudentGaiFeedback(gai, classContext);
+      if (submission) {
+        await ensureSubmissionGaiLlm(submission, {
+          assignment,
+          taskTemplate: assignment.taskTemplate,
+          classContext,
+        });
+        gaiFeedback = enrichStudentFeedback(gaiFeedback, submission);
+      }
+    }
+
+    const variantCount = assignment.variants?.length || 1;
+    let variantHash = 0;
+    const uidStr = String(req.userId || '0');
+    for (let i = 0; i < uidStr.length; i += 1) {
+      variantHash = (variantHash + uidStr.charCodeAt(i)) % 10000;
+    }
+    const studentVariantIdx = variantCount > 1 ? variantHash % variantCount : 0;
+    const studentVariant = assignment.variants?.[studentVariantIdx];
+    const rawHintInput = studentVariant?.inputData;
+    const variantForHint =
+      rawHintInput?.input && typeof rawHintInput.input === 'object'
+        ? rawHintInput.input
+        : rawHintInput || {};
+    const gaiStudyHint =
+      !submission && isLlmEnabled()
+        ? await getStudyHintForAssignment(assignment._id, req.userId, {
+            assignment,
+            taskTemplate: assignment.taskTemplate,
+            inputData: variantForHint,
+          })
+        : null;
 
     // Prepare assignment data for student (without solutions)
     const studentAssignment = {
@@ -119,8 +180,13 @@ router.get('/assignments/:id', auth, requireRole('student'), async (req, res) =>
         feedback: submission.feedback,
         submittedAt: submission.submittedAt,
         attemptNumber: submission.attemptNumber,
-        isLate: submission.isLate
+        isLate: submission.isLate,
+        gaiFeedback,
       } : null,
+      gaiFeedback,
+      gaiContext: classContext,
+      gaiStudyHint,
+      gaiLlmEnabled: isLlmEnabled(),
       studentStatus,
       submissionCount: submissions.length,
       maxAttempts: assignment.options?.maxAttempts ?? 3,
@@ -222,10 +288,11 @@ router.post('/assignments/:id/submit', auth, requireRole('student'), async (req,
       submission.latePenalty = submission.calculateLatePenalty(assignment);
     }
 
+    const taskTemplate = await TaskTemplate.findById(assignment.taskTemplate);
+
     // Auto-grade if enabled
     if (assignment.options.autoGrade) {
       try {
-        const taskTemplate = await TaskTemplate.findById(assignment.taskTemplate);
         await submission.autoGrade(assignment, taskTemplate);
       } catch (error) {
         console.error('Auto-grading failed:', error);
@@ -235,38 +302,72 @@ router.post('/assignments/:id/submit', auth, requireRole('student'), async (req,
 
     await submission.save();
 
-    const studentUser = await User.findById(req.userId).select('name email');
-    await createNotification({
-      userId: assignment.createdBy,
-      type: 'submission_received',
-      title: `Ново предаване: ${assignment.title}`,
-      body: `От ${studentUser?.name || studentUser?.email || 'ученик'}`,
-      link: `/classroom/review?assignment=${assignment._id}`,
-      meta: { submissionId: submission._id, assignmentId: assignment._id },
-    });
+    try {
+      const studentUser = await User.findById(req.userId).select('name email');
+      await createNotification({
+        userId: assignment.createdBy,
+        type: 'submission_received',
+        title: `Ново предаване: ${assignment.title}`,
+        body: `От ${studentUser?.name || studentUser?.email || 'ученик'}`,
+        link: `/classroom/review?assignment=${assignment._id}`,
+        meta: { submissionId: submission._id, assignmentId: assignment._id },
+      });
+    } catch (sideErr) {
+      console.error('Post-submit notification failed:', sideErr);
+    }
 
-    // Update assignment statistics
-    assignment.statistics.totalSubmissions += 1;
-    await assignment.save();
+    try {
+      if (!assignment.statistics) {
+        assignment.statistics = { totalSubmissions: 0, averageScore: 0, completionRate: 0 };
+      }
+      assignment.statistics.totalSubmissions += 1;
+      await assignment.save();
+    } catch (sideErr) {
+      console.error('Post-submit statistics failed:', sideErr);
+    }
 
-    // Log audit
-    await Audit.logOperation({
-      operation: 'submit_assignment',
-      performedBy: req.userId,
-      targetEntity: {
-        type: 'submission',
-        id: submission._id
-      },
-      description: `Изпратен submission за задание: ${assignment.title}`,
-      newValues: {
-        assignment: assignment.title,
-        variantIndex,
-        score: submission.finalScore,
-        isLate
-      },
-      ipAddress: req.ip,
-      userAgent: req.get('User-Agent')
+    try {
+      await Audit.logOperation({
+        operation: 'submit_assignment',
+        performedBy: req.userId,
+        targetEntity: {
+          type: 'submission',
+          id: submission._id,
+        },
+        description: `Изпратен submission за задание: ${assignment.title}`,
+        newValues: {
+          assignment: assignment.title,
+          variantIndex,
+          score: submission.finalScore,
+          isLate,
+        },
+        ipAddress: req.ip,
+        userAgent: req.get('User-Agent'),
+      });
+    } catch (sideErr) {
+      console.error('Post-submit audit failed:', sideErr);
+    }
+
+    const toolKey = resolveToolKey(taskTemplate);
+    const gaiInsights = buildSubmissionGaiInsights({
+      submission,
+      toolKey,
+      tolerance:
+        assignment.settings?.customTolerance ?? taskTemplate?.gradingSettings?.tolerance,
+      toleranceType:
+        assignment.settings?.customToleranceType ?? taskTemplate?.gradingSettings?.toleranceType,
     });
+    const allSubs = await Submission.find({ assignment: assignment._id }).select(
+      'answers rawComparison finalScore variantIndex'
+    );
+    const classContext = buildAnonymousClassContext({ submissions: allSubs, toolKey });
+    let gaiFeedback = buildStudentGaiFeedback(gaiInsights, classContext);
+    await ensureSubmissionGaiLlm(submission, {
+      assignment,
+      taskTemplate,
+      classContext,
+    });
+    gaiFeedback = enrichStudentFeedback(gaiFeedback, submission);
 
     res.status(201).json({
       success: true,
@@ -276,8 +377,11 @@ router.post('/assignments/:id/submit', auth, requireRole('student'), async (req,
         score: submission.finalScore,
         status: submission.status,
         isLate,
-        feedback: submission.feedback
-      }
+        feedback: submission.feedback,
+        gaiFeedback,
+        gaiContext: classContext,
+        gaiLlmEnabled: isLlmEnabled(),
+      },
     });
   } catch (error) {
     res.status(500).json({

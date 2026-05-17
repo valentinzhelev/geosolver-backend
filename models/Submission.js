@@ -101,7 +101,19 @@ const submissionSchema = new mongoose.Schema({
     min: 0,
     max: 100,
     default: 0
-  }
+  },
+  // GAI LLM narratives (cached after first generation)
+  gaiLlm: {
+    student: { bg: String, en: String },
+    teacher: { bg: String, en: String },
+    generatedAt: Date,
+    model: String,
+  },
+  gaiLlmStudyHint: {
+    bg: String,
+    en: String,
+    generatedAt: Date,
+  },
 }, { 
   timestamps: true 
 });

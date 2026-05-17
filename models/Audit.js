@@ -22,6 +22,7 @@ const auditSchema = new mongoose.Schema({
       'update_task_template',
       'delete_task_template',
       'view_submissions',
+      'submit_assignment',
       'export_data',
       'system_action'
     ]

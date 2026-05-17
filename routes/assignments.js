@@ -104,15 +104,24 @@ router.get('/review-queue/list', auth, requireRole('teacher'), async (req, res) 
       .sort(sort === 'oldest' ? { submittedAt: 1 } : { submittedAt: -1 })
       .limit(100);
 
-    const enriched = submissions.map((s) => ({
-      ...s.toObject(),
-      answers: s.answers,
-      variantIndex: s.variantIndex,
-      rawComparison: s.rawComparison,
-      finalScore: s.finalScore,
-      computedScore: s.computedScore,
-      feedback: s.feedback,
-    }));
+    const { buildSubmissionGaiInsights, resolveToolKey } = require('../utils/gaiInsights');
+
+    const enriched = submissions.map((s) => {
+      const toolKey = resolveToolKey(s.assignment?.taskTemplate);
+      const gaiInsights = buildSubmissionGaiInsights({ submission: s, toolKey });
+      return {
+        ...s.toObject(),
+        answers: s.answers,
+        variantIndex: s.variantIndex,
+        rawComparison: s.rawComparison,
+        finalScore: s.finalScore,
+        computedScore: s.computedScore,
+        feedback: s.feedback,
+        gaiInsights,
+        gaiLlm: s.gaiLlm,
+        llmNarrative: s.gaiLlm?.teacher,
+      };
+    });
 
     res.json({ success: true, data: enriched, count: enriched.length });
   } catch (error) {
@@ -474,6 +483,40 @@ router.put('/:id', auth, requireRole('teacher'), async (req, res) => {
   }
 });
 
+// GAI analytics for an assignment (class-level insights)
+router.get('/:id/gai-analytics', auth, requireRole('teacher'), async (req, res) => {
+  try {
+    const { buildAssignmentGaiAnalytics, resolveToolKey } = require('../utils/gaiInsights');
+    const assignment = await Assignment.findById(req.params.id).populate(
+      'taskTemplate',
+      'name type tags paramsSchema gradingSettings'
+    );
+
+    if (!assignment) {
+      return res.status(404).json({ success: false, message: 'Заданието не е намерено' });
+    }
+
+    if (assignment.createdBy.toString() !== req.userId && req.userRole !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Нямате права' });
+    }
+
+    const submissions = await Submission.find({ assignment: assignment._id })
+      .populate('student', 'name email')
+      .sort({ submittedAt: -1 });
+
+    const toolKey = resolveToolKey(assignment.taskTemplate);
+    const analytics = buildAssignmentGaiAnalytics({ submissions, toolKey });
+
+    res.json({ success: true, data: analytics });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Грешка при GAI анализ',
+      error: error.message,
+    });
+  }
+});
+
 // Get submissions for assignment
 router.get('/:id/submissions', auth, requireRole('teacher'), async (req, res) => {
   try {
@@ -498,10 +541,24 @@ router.get('/:id/submissions', auth, requireRole('teacher'), async (req, res) =>
       .populate('student', 'name email')
       .sort({ submittedAt: -1 });
 
+    const assignmentWithTemplate = await Assignment.findById(assignment._id).populate(
+      'taskTemplate',
+      'tags paramsSchema gradingSettings'
+    );
+    const { buildSubmissionGaiInsights, resolveToolKey } = require('../utils/gaiInsights');
+    const toolKey = resolveToolKey(assignmentWithTemplate?.taskTemplate);
+
+    const enriched = submissions.map((s) => ({
+      ...s.toObject(),
+      gaiInsights: buildSubmissionGaiInsights({ submission: s, toolKey }),
+      gaiLlm: s.gaiLlm,
+      llmNarrative: s.gaiLlm?.teacher,
+    }));
+
     res.json({
       success: true,
-      data: submissions,
-      count: submissions.length
+      data: enriched,
+      count: enriched.length,
     });
   } catch (error) {
     res.status(500).json({
