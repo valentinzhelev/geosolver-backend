@@ -155,7 +155,7 @@ assignmentSchema.methods.generateVariants = async function() {
   
   for (let i = 0; i < this.variantsCount; i++) {
     try {
-      const inputData = template.generateTestData(i, Date.now());
+      const inputData = template.generateTestData(i, null);
       const solution = template.generateSolution(inputData);
       
       // Create solution hash for security

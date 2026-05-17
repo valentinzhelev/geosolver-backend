@@ -15,7 +15,7 @@ const plans = [
     },
     features: [
       { bg: 'Основен достъп до всички инструменти', en: 'Basic access to all tools' },
-      { bg: '5 изчисления с всеки инструмент на месец', en: '5 calculations with each tool per month' }
+      { bg: '5 изчисления общо (всички инструменти)', en: '5 calculations total (all tools)' }
     ],
     limits: {
       calculationsPerMonth: 5,

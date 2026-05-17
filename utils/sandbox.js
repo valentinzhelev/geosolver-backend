@@ -64,15 +64,19 @@ class SandboxExecutor {
     try {
       const context = this.createContext();
       
-      // Set seed for reproducible results
-      if (seed !== null) {
-        context.Math = {
-          ...Math,
-          random: function() {
-            const x = Math.sin(seed) * 10000;
-            return x - Math.floor(x);
-          }
+      // Seeded random — keep all Math.* methods (spread Math loses round/sin/cos)
+      if (seed != null) {
+        let state = Number(seed) || 1;
+        const math = Object.create(null);
+        for (const key of Object.getOwnPropertyNames(Math)) {
+          const val = Math[key];
+          math[key] = typeof val === 'function' ? val.bind(Math) : val;
+        }
+        math.random = function () {
+          state = (state * 1664525 + 1013904223) >>> 0;
+          return state / 4294967296;
         };
+        context.Math = math;
       }
 
       // Execute the generator script

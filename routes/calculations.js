@@ -3,26 +3,39 @@ const router = express.Router();
 const Calculation = require('../models/Calculation');
 const User = require('../models/User');
 const auth = require('../middleware/auth');
+const { getLimitsForUser } = require('../utils/calculationLimits');
 
-// POST /api/calculations - Save calculation
+function getUserIdFromRequest(req) {
+  const token = req.header('Authorization')?.replace('Bearer ', '');
+  if (!token) return null;
+  try {
+    const jwt = require('jsonwebtoken');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+    return decoded.id;
+  } catch {
+    return null;
+  }
+}
+
+// POST /api/calculations - Save calculation (authenticated, counts toward shared limit)
 router.post('/', async (req, res) => {
   try {
     const { toolName, toolDisplayName, inputData, resultData, calculationTime } = req.body;
-    
-    // Check if user is authenticated
-    const token = req.header('Authorization')?.replace('Bearer ', '');
-    let userId = null;
-    
-    if (token) {
-      try {
-        const jwt = require('jsonwebtoken');
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
-        userId = decoded.id;
-      } catch (jwtError) {
-        console.log('Invalid token, saving as anonymous calculation');
-      }
+
+    const userId = getUserIdFromRequest(req);
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
     }
-    
+
+    const limits = await getLimitsForUser(userId);
+    if (!limits.canCalculate) {
+      return res.status(403).json({
+        error: 'Calculation limit reached',
+        used: limits.used,
+        limit: limits.limit,
+      });
+    }
+
     // Save calculation
     const calculation = new Calculation({
       userId: userId, // Can be null for anonymous users
@@ -132,62 +145,14 @@ router.get('/stats', auth, async (req, res) => {
   }
 });
 
-// GET /api/calculations/limits - Check limits
+// GET /api/calculations/limits - Check shared limits (all tools combined)
 router.get('/limits', async (req, res) => {
   try {
-    const token = req.header('Authorization')?.replace('Bearer ', '');
-    let userId = null;
-    
-    if (token) {
-      try {
-        const jwt = require('jsonwebtoken');
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
-        userId = decoded.id;
-      } catch (jwtError) {
-        console.log('Invalid token, using anonymous limits');
-      }
-    }
-
-    // Get free plan limits
-    const Plan = require('../models/Plan');
-    const plan = await Plan.findOne({ name: 'free' });
-    
-    if (!plan) {
-      return res.status(500).json({ error: 'Free plan not found' });
-    }
-
-    let totalCalculations = 0;
-    
-    if (userId) {
-      // For logged users, count all-time calculations
-      totalCalculations = await Calculation.countDocuments({
-        userId: userId
-      });
-    } else {
-      // For anonymous users, count all-time by IP
-      totalCalculations = await Calculation.countDocuments({
-        userId: null,
-        ipAddress: req.ip
-      });
-    }
-
-    // Check if user has Pro (Stripe subscription)
-    let unlimited = plan.limits.unlimited;
-    if (userId) {
-      const user = await User.findById(userId).select('plan subscriptionStatus');
-      if (user?.plan === 'pro' || ['active', 'trialing'].includes(user?.subscriptionStatus)) {
-        unlimited = true;
-      }
-    }
-    const limit = unlimited ? -1 : (plan.limits.calculationsPerMonth || plan.limits.calculationsPerDay || 5);
-    const canCalculate = unlimited || totalCalculations < limit;
-
+    const userId = getUserIdFromRequest(req);
+    const limits = await getLimitsForUser(userId);
     res.json({
-      canCalculate,
-      used: totalCalculations,
-      limit: unlimited ? -1 : limit,
-      unlimited,
-      planName: plan.name
+      ...limits,
+      planName: 'free',
     });
   } catch (error) {
     res.status(500).json({ error: error.message });

@@ -9,7 +9,14 @@ const Audit = require('../models/Audit');
 // Get all courses for teacher
 router.get('/', auth, requireRole('teacher'), async (req, res) => {
   try {
-    const courses = await Course.find({ owner: req.userId })
+    const { archived } = req.query;
+    const courseFilter = req.userRole === 'admin' ? {} : { owner: req.userId };
+    if (archived === 'true') {
+      courseFilter.isActive = false;
+    } else {
+      courseFilter.isActive = { $ne: false };
+    }
+    const courses = await Course.find(courseFilter)
       .populate('students', 'name email')
       .sort({ createdAt: -1 });
 
@@ -79,8 +86,11 @@ router.post('/', auth, requireRole('teacher'), async (req, res) => {
       });
     }
 
-    // Check if code already exists
-    const existingCourse = await Course.findOne({ code: code.toUpperCase() });
+    // Check if code already exists among active groups (archived codes can be reused)
+    const existingCourse = await Course.findOne({
+      code: code.toUpperCase(),
+      isActive: { $ne: false },
+    });
     if (existingCourse) {
       return res.status(400).json({
         success: false,
@@ -362,6 +372,65 @@ router.delete('/:id/students/:studentId', auth, requireRole('teacher'), async (r
       success: false,
       message: 'Грешка при премахване на студента',
       error: error.message
+    });
+  }
+});
+
+// Archive / restore course (soft remove — isActive: false)
+router.patch('/:id/status', auth, requireRole('teacher'), async (req, res) => {
+  try {
+    const { isActive } = req.body;
+    if (typeof isActive !== 'boolean') {
+      return res.status(400).json({
+        success: false,
+        message: 'Подайте isActive: true или false',
+      });
+    }
+
+    const course = await Course.findById(req.params.id);
+    if (!course) {
+      return res.status(404).json({
+        success: false,
+        message: 'Курсът не е намерен',
+      });
+    }
+
+    if (course.owner.toString() !== req.userId && req.userRole !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Нямате права',
+      });
+    }
+
+    course.isActive = isActive;
+    await course.save();
+
+    try {
+      await Audit.logOperation({
+        operation: isActive ? 'restore_course' : 'archive_course',
+        performedBy: req.userId,
+        targetEntity: { type: 'course', id: course._id },
+        description: isActive
+          ? `Възстановена група: ${course.name} (${course.code})`
+          : `Архивирана група: ${course.name} (${course.code})`,
+        newValues: { isActive },
+        ipAddress: req.ip,
+        userAgent: req.get('User-Agent'),
+      });
+    } catch (auditErr) {
+      console.warn('Audit log failed (course status):', auditErr.message);
+    }
+
+    res.json({
+      success: true,
+      message: isActive ? 'Групата е възстановена' : 'Групата е архивирана',
+      data: course,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Грешка при промяна на статуса на групата',
+      error: error.message,
     });
   }
 });

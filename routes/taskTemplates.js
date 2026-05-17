@@ -4,6 +4,21 @@ const TaskTemplate = require('../models/TaskTemplate');
 const auth = require('../middleware/auth');
 const requireRole = require('../middleware/role');
 const Audit = require('../models/Audit');
+const { ensureMvpTemplates } = require('../utils/ensureMvpTemplates');
+
+// Built-in MVP calculator templates
+router.get('/builtin/list', auth, async (req, res) => {
+  try {
+    const { templates } = await ensureMvpTemplates();
+    res.json({ success: true, data: templates });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Грешка при зареждане на вградените шаблони',
+      error: error.message,
+    });
+  }
+});
 
 // Get all task templates (with filters)
 router.get('/', auth, async (req, res) => {

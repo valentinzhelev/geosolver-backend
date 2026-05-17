@@ -7,18 +7,23 @@ const Submission = require('../models/Submission');
 const auth = require('../middleware/auth');
 const requireRole = require('../middleware/role');
 const Audit = require('../models/Audit');
+const { getTemplateByToolKey } = require('../utils/ensureMvpTemplates');
+const { includesId } = require('../utils/objectId');
 
 // Get all assignments for teacher
 router.get('/', auth, requireRole('teacher'), async (req, res) => {
   try {
     const { course, status, limit = 50 } = req.query;
-    const filter = { createdBy: req.userId };
+    const filter = req.userRole === 'admin' ? {} : { createdBy: req.userId };
 
     if (course) {
       filter.course = course;
     }
     if (status) {
       filter.status = status;
+    } else {
+      // By default hide archived (soft-deleted) assignments
+      filter.status = { $ne: 'archived' };
     }
 
     const assignments = await Assignment.find(filter)
@@ -41,6 +46,78 @@ router.get('/', auth, requireRole('teacher'), async (req, res) => {
   }
 });
 
+// Pending submissions across all teacher assignments
+router.get('/review-queue/list', auth, requireRole('teacher'), async (req, res) => {
+  try {
+    const assignmentQuery = req.userRole === 'admin' ? {} : { createdBy: req.userId };
+    const assignments = await Assignment.find(assignmentQuery).select('_id');
+    const assignmentIds = assignments.map((a) => a._id);
+
+    const submissions = await Submission.find({
+      assignment: { $in: assignmentIds },
+      status: { $in: ['submitted', 'needs_review'] },
+    })
+      .populate('student', 'name email')
+      .populate('assignment', 'title dueDate course')
+      .sort({ submittedAt: -1 })
+      .limit(100);
+
+    res.json({ success: true, data: submissions, count: submissions.length });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Грешка при зареждане на опашката',
+      error: error.message,
+    });
+  }
+});
+
+// Update assignment status (draft / active / archived)
+router.patch('/:id/status', auth, requireRole('teacher'), async (req, res) => {
+  try {
+    const { status } = req.body;
+    const allowed = ['draft', 'active', 'completed', 'archived'];
+    if (!allowed.includes(status)) {
+      return res.status(400).json({ success: false, message: 'Невалиден статус' });
+    }
+
+    const assignment = await Assignment.findById(req.params.id);
+    if (!assignment) {
+      return res.status(404).json({ success: false, message: 'Заданието не е намерено' });
+    }
+
+    const course = await Course.findById(assignment.course);
+    const isCourseOwner = course && course.owner.toString() === req.userId;
+    const isCreator = assignment.createdBy.toString() === req.userId;
+
+    if (!isCreator && !isCourseOwner && req.userRole !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Нямате права' });
+    }
+
+    assignment.status = status;
+    await assignment.save();
+
+    const statusMessages = {
+      archived: 'Заданието е архивирано',
+      active: 'Заданието е възстановено',
+      draft: 'Заданието е в чернова',
+      completed: 'Заданието е приключено',
+    };
+
+    res.json({
+      success: true,
+      data: assignment,
+      message: statusMessages[status] || 'Статусът е обновен',
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Грешка при промяна на статуса',
+      error: error.message,
+    });
+  }
+});
+
 // Get single assignment
 router.get('/:id', auth, async (req, res) => {
   try {
@@ -58,7 +135,10 @@ router.get('/:id', auth, async (req, res) => {
 
     // Check access permissions
     const isCreator = assignment.createdBy._id.toString() === req.userId;
-    const isStudent = assignment.course.students.some(student => student._id.toString() === req.userId);
+    const isStudent = includesId(
+      assignment.course.students.map((s) => s._id || s),
+      req.userId
+    );
     const isAdmin = req.userRole === 'admin';
 
     if (!isCreator && !isStudent && !isAdmin) {
@@ -104,14 +184,28 @@ router.post('/', auth, requireRole('teacher'), async (req, res) => {
       title,
       description,
       taskTemplate,
+      toolKey,
       course,
       variantsCount,
       dueDate,
-      options
+      options,
+      status: requestedStatus,
     } = req.body;
 
+    let templateId = taskTemplate;
+    if (!templateId && toolKey) {
+      const builtin = await getTemplateByToolKey(toolKey);
+      if (!builtin) {
+        return res.status(400).json({
+          success: false,
+          message: 'Невалиден инструмент за задание',
+        });
+      }
+      templateId = builtin._id;
+    }
+
     // Validate required fields
-    if (!title || !taskTemplate || !course || !variantsCount || !dueDate) {
+    if (!title || !templateId || !course || !variantsCount || !dueDate) {
       return res.status(400).json({
         success: false,
         message: 'Липсват задължителни полета'
@@ -135,7 +229,7 @@ router.post('/', auth, requireRole('teacher'), async (req, res) => {
     }
 
     // Check if task template exists
-    const template = await TaskTemplate.findById(taskTemplate);
+    const template = await TaskTemplate.findById(templateId);
     if (!template) {
       return res.status(404).json({
         success: false,
@@ -146,11 +240,12 @@ router.post('/', auth, requireRole('teacher'), async (req, res) => {
     const assignment = new Assignment({
       title,
       description: description || '',
-      taskTemplate,
+      taskTemplate: templateId,
       course,
       variantsCount,
       dueDate: new Date(dueDate),
       createdBy: req.userId,
+      status: requestedStatus === 'draft' ? 'draft' : 'active',
       options: {
         allowLateSubmissions: options?.allowLateSubmissions ?? true,
         lateSubmissionPenalty: options?.lateSubmissionPenalty ?? 0.1,
@@ -175,7 +270,8 @@ router.post('/', auth, requireRole('teacher'), async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Грешка при генериране на вариантите',
-        error: error.message
+        error: error.message,
+        detail: error.message,
       });
     }
 

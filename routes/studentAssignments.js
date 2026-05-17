@@ -7,6 +7,7 @@ const TaskTemplate = require('../models/TaskTemplate');
 const auth = require('../middleware/auth');
 const requireRole = require('../middleware/role');
 const Audit = require('../models/Audit');
+const { includesId } = require('../utils/objectId');
 
 // Get assignments for student
 router.get('/assignments', auth, requireRole('student'), async (req, res) => {
@@ -80,7 +81,7 @@ router.get('/assignments/:id', auth, requireRole('student'), async (req, res) =>
 
     // Check if student is enrolled in the course
     const course = await Course.findById(assignment.course);
-    if (!course.students.includes(req.userId)) {
+    if (!includesId(course.students, req.userId)) {
       return res.status(403).json({
         success: false,
         message: 'Нямате достъп до това задание'
@@ -150,7 +151,7 @@ router.post('/assignments/:id/submit', auth, requireRole('student'), async (req,
 
     // Check if student is enrolled in the course
     const course = await Course.findById(assignment.course);
-    if (!course.students.includes(req.userId)) {
+    if (!includesId(course.students, req.userId)) {
       return res.status(403).json({
         success: false,
         message: 'Нямате достъп до това задание'
@@ -189,7 +190,6 @@ router.post('/assignments/:id/submit', auth, requireRole('student'), async (req,
 
     // Check if late submission
     const isLate = new Date() > assignment.dueDate;
-    const latePenalty = isLate ? assignment.calculateLatePenalty(assignment) : 0;
 
     // Create submission
     const submission = new Submission({
@@ -199,9 +199,13 @@ router.post('/assignments/:id/submit', auth, requireRole('student'), async (req,
       answers,
       timeSpent: timeSpent || 0,
       isLate,
-      latePenalty,
+      latePenalty: 0,
       attemptNumber: existingSubmissions.length + 1
     });
+
+    if (isLate) {
+      submission.latePenalty = submission.calculateLatePenalty(assignment);
+    }
 
     // Auto-grade if enabled
     if (assignment.options.autoGrade) {

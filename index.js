@@ -24,7 +24,10 @@ const webhooksRoutes = require('./routes/webhooks');
 const taskTemplateRoutes = require('./routes/taskTemplates');
 const courseRoutes = require('./routes/courses');
 const studentAssignmentRoutes = require('./routes/studentAssignments');
+const studentCourseRoutes = require('./routes/studentCourses');
+const classroomOverviewRoutes = require('./routes/classroomOverview');
 const scanRoutes = require('./routes/scan');
+const { ensureMvpTemplates } = require('./utils/ensureMvpTemplates');
 
 const app = express();
 app.use(cors({
@@ -55,7 +58,9 @@ app.use('/api/users', usersRoutes);
 app.use('/api/teacher/tasks', taskTemplateRoutes);
 app.use('/api/teacher/courses', courseRoutes);
 app.use('/api/teacher/assignments', assignmentRoutes);
+app.use('/api/teacher/classroom', classroomOverviewRoutes);
 app.use('/api/student/assignments', studentAssignmentRoutes);
+app.use('/api/student/courses', studentCourseRoutes);
 app.use('/api/scan', scanRoutes);
 app.use('/api/billing', billingRoutes);
 
@@ -72,8 +77,16 @@ app.get('/api/health', (req, res) => {
 mongoose.connect(process.env.MONGODB_URI, {
     useNewUrlParser: true,
     useUnifiedTopology: true
-}).then(() => {
+}).then(async () => {
     console.log("Connected to MongoDB");
+    try {
+      const { created } = await ensureMvpTemplates();
+      if (created > 0) {
+        console.log(`Edu: seeded ${created} MVP task template(s)`);
+      }
+    } catch (e) {
+      console.warn('Edu: MVP template seed skipped:', e.message);
+    }
     const PORT = process.env.PORT || 5000;
     app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 }).catch(err => console.error("MongoDB connection error:", err));
