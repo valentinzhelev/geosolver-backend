@@ -11,8 +11,9 @@ async function getFreePlanLimit() {
 }
 
 async function isUserUnlimited(userId) {
-  const user = await User.findById(userId).select('plan subscriptionStatus');
+  const user = await User.findById(userId).select('plan subscriptionStatus role');
   if (!user) return false;
+  if (user.role === 'admin') return true;
   return user.plan === 'pro' || ['active', 'trialing'].includes(user.subscriptionStatus);
 }
 
