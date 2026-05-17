@@ -32,7 +32,7 @@ router.get('/assignments', auth, requireRole('student'), async (req, res) => {
 
     const assignments = await Assignment.find(filter)
       .populate('course', 'name code')
-      .populate('taskTemplate', 'name type difficulty description')
+      .populate('taskTemplate', 'name type difficulty description tags paramsSchema')
       .sort({ dueDate: 1 });
 
     // Add submission status for each assignment
@@ -79,7 +79,7 @@ router.get('/assignments/:id', auth, requireRole('student'), async (req, res) =>
   try {
     const assignment = await Assignment.findById(req.params.id)
       .populate('course', 'name code')
-      .populate('taskTemplate', 'name type difficulty description');
+      .populate('taskTemplate', 'name type difficulty description tags paramsSchema');
 
     if (!assignment) {
       return res.status(404).json({
