@@ -10,6 +10,7 @@ const ASSIGNMENT_PRESETS = [
     maxAttempts: 3,
     customTolerance: 0.01,
     customToleranceType: 'absolute',
+    calculatorPolicy: 'guided',
   },
   {
     id: 'week-second-task',
@@ -21,6 +22,7 @@ const ASSIGNMENT_PRESETS = [
     maxAttempts: 3,
     customTolerance: 0.01,
     customToleranceType: 'absolute',
+    calculatorPolicy: 'guided',
   },
   {
     id: 'week-forward',
@@ -32,6 +34,7 @@ const ASSIGNMENT_PRESETS = [
     maxAttempts: 2,
     customTolerance: 0.01,
     customToleranceType: 'absolute',
+    calculatorPolicy: 'guided',
   },
   {
     id: 'week-resection',
@@ -43,6 +46,7 @@ const ASSIGNMENT_PRESETS = [
     maxAttempts: 2,
     customTolerance: 0.01,
     customToleranceType: 'absolute',
+    calculatorPolicy: 'guided',
   },
 ];
 

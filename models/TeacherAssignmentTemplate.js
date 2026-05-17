@@ -15,6 +15,11 @@ const teacherAssignmentTemplateSchema = new mongoose.Schema(
       enum: ['absolute', 'relative', 'percentage'],
       default: 'absolute',
     },
+    calculatorPolicy: {
+      type: String,
+      enum: ['off', 'guided', 'full'],
+      default: 'guided',
+    },
   },
   { timestamps: true }
 );

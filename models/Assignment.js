@@ -72,7 +72,13 @@ const assignmentSchema = new mongoose.Schema({
     showFeedback: {
       type: Boolean,
       default: true
-    }
+    },
+    /** off = submit only; guided = edu calculator (no consumer limit); full = same as guided */
+    calculatorPolicy: {
+      type: String,
+      enum: ['off', 'guided', 'full'],
+      default: 'guided',
+    },
   },
   // Generated variants data
   variants: [{

@@ -30,8 +30,20 @@ const calculationSchema = new mongoose.Schema({
   resultData: { type: mongoose.Schema.Types.Mixed, required: true },
   calculationTime: { type: Number }, // in milliseconds
   ipAddress: { type: String },
-  userAgent: { type: String }
+  userAgent: { type: String },
+  context: {
+    type: String,
+    enum: ['consumer', 'edu'],
+    default: 'consumer',
+  },
+  assignmentId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Assignment',
+    default: null,
+  },
 }, { timestamps: true });
+
+calculationSchema.index({ userId: 1, context: 1 });
 
 // Index for efficient queries
 calculationSchema.index({ userId: 1, createdAt: -1 });

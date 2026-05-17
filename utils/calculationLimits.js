@@ -34,7 +34,10 @@ async function getLimitsForUser(userId) {
   }
 
   const unlimited = await isUserUnlimited(userId);
-  const used = await Calculation.countDocuments({ userId });
+  const used = await Calculation.countDocuments({
+    userId,
+    $or: [{ context: { $exists: false } }, { context: null }, { context: 'consumer' }],
+  });
 
   if (unlimited) {
     return {

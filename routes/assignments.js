@@ -67,16 +67,27 @@ router.get('/presets/list', auth, requireRole('teacher'), async (req, res) => {
 // Pending submissions across all teacher assignments
 router.get('/review-queue/list', auth, requireRole('teacher'), async (req, res) => {
   try {
-    const { course, late, manualOnly, sort } = req.query;
+    const { course, late, manualOnly, sort, scope } = req.query;
     const assignmentQuery = req.userRole === 'admin' ? {} : { createdBy: req.userId };
     if (course) assignmentQuery.course = course;
 
     const assignments = await Assignment.find(assignmentQuery).select('_id');
     const assignmentIds = assignments.map((a) => a._id);
 
+    let statusFilter;
+    if (manualOnly === 'true') {
+      statusFilter = 'needs_review';
+    } else if (scope === 'pending') {
+      statusFilter = { $in: ['submitted', 'needs_review'] };
+    } else if (scope === 'graded') {
+      statusFilter = 'graded';
+    } else {
+      statusFilter = { $in: ['submitted', 'needs_review', 'graded'] };
+    }
+
     const submissionFilter = {
       assignment: { $in: assignmentIds },
-      status: manualOnly === 'true' ? 'needs_review' : { $in: ['submitted', 'needs_review'] },
+      status: statusFilter,
     };
     if (late === 'true') submissionFilter.isLate = true;
 
@@ -84,8 +95,11 @@ router.get('/review-queue/list', auth, requireRole('teacher'), async (req, res) 
       .populate('student', 'name email')
       .populate({
         path: 'assignment',
-        select: 'title dueDate course',
-        populate: { path: 'course', select: 'name code' },
+        select: 'title dueDate course taskTemplate',
+        populate: [
+          { path: 'course', select: 'name code' },
+          { path: 'taskTemplate', select: 'name type tags paramsSchema' },
+        ],
       })
       .sort(sort === 'oldest' ? { submittedAt: 1 } : { submittedAt: -1 })
       .limit(100);
@@ -94,6 +108,10 @@ router.get('/review-queue/list', auth, requireRole('teacher'), async (req, res) 
       ...s.toObject(),
       answers: s.answers,
       variantIndex: s.variantIndex,
+      rawComparison: s.rawComparison,
+      finalScore: s.finalScore,
+      computedScore: s.computedScore,
+      feedback: s.feedback,
     }));
 
     res.json({ success: true, data: enriched, count: enriched.length });
@@ -182,7 +200,7 @@ router.get('/:id', auth, async (req, res) => {
   try {
     const assignment = await Assignment.findById(req.params.id)
       .populate('course', 'name code students')
-      .populate('taskTemplate', 'name type difficulty description')
+      .populate('taskTemplate', 'name type difficulty description tags paramsSchema')
       .populate('createdBy', 'name email');
 
     if (!assignment) {
@@ -313,7 +331,8 @@ router.post('/', auth, requireRole('teacher'), async (req, res) => {
         maxAttempts: options?.maxAttempts ?? 3,
         timeLimit: options?.timeLimit,
         showCorrectAnswers: options?.showCorrectAnswers ?? false,
-        showFeedback: options?.showFeedback ?? true
+        showFeedback: options?.showFeedback ?? true,
+        calculatorPolicy: options?.calculatorPolicy || 'guided',
       },
       settings: {
         customTolerance: options?.customTolerance,

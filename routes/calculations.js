@@ -4,6 +4,7 @@ const Calculation = require('../models/Calculation');
 const User = require('../models/User');
 const auth = require('../middleware/auth');
 const { getLimitsForUser } = require('../utils/calculationLimits');
+const { validateEduCalculationAccess } = require('../utils/eduCalculationAccess');
 
 function getUserIdFromRequest(req) {
   const token = req.header('Authorization')?.replace('Bearer ', '');
@@ -20,32 +21,46 @@ function getUserIdFromRequest(req) {
 // POST /api/calculations - Save calculation (authenticated, counts toward shared limit)
 router.post('/', async (req, res) => {
   try {
-    const { toolName, toolDisplayName, inputData, resultData, calculationTime } = req.body;
+    const { toolName, toolDisplayName, inputData, resultData, calculationTime, eduContext } = req.body;
 
     const userId = getUserIdFromRequest(req);
     if (!userId) {
       return res.status(401).json({ error: 'Authentication required' });
     }
 
-    const limits = await getLimitsForUser(userId);
-    if (!limits.canCalculate) {
-      return res.status(403).json({
-        error: 'Calculation limit reached',
-        used: limits.used,
-        limit: limits.limit,
-      });
+    let context = 'consumer';
+    let assignmentId = null;
+
+    if (eduContext?.assignmentId) {
+      try {
+        await validateEduCalculationAccess(userId, eduContext.assignmentId);
+        context = 'edu';
+        assignmentId = eduContext.assignmentId;
+      } catch (eduErr) {
+        return res.status(eduErr.status || 403).json({ error: eduErr.message });
+      }
+    } else {
+      const limits = await getLimitsForUser(userId);
+      if (!limits.canCalculate) {
+        return res.status(403).json({
+          error: 'Calculation limit reached',
+          used: limits.used,
+          limit: limits.limit,
+        });
+      }
     }
 
-    // Save calculation
     const calculation = new Calculation({
-      userId: userId, // Can be null for anonymous users
+      userId: userId,
       toolName,
       toolDisplayName,
       inputData,
       resultData,
       calculationTime,
       ipAddress: req.ip,
-      userAgent: req.get('User-Agent')
+      userAgent: req.get('User-Agent'),
+      context,
+      assignmentId,
     });
     
     await calculation.save();

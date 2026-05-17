@@ -16,8 +16,17 @@ router.get('/', auth, requireRole('teacher'), async (req, res) => {
 
 router.post('/', auth, requireRole('teacher'), async (req, res) => {
   try {
-    const { title, toolKey, description, variantsCount, maxAttempts, daysUntilDue, customTolerance, customToleranceType } =
-      req.body;
+    const {
+      title,
+      toolKey,
+      description,
+      variantsCount,
+      maxAttempts,
+      daysUntilDue,
+      customTolerance,
+      customToleranceType,
+      calculatorPolicy,
+    } = req.body;
     if (!title || !toolKey) {
       return res.status(400).json({ success: false, message: 'Заглавие и инструмент са задължителни' });
     }
@@ -31,6 +40,7 @@ router.post('/', auth, requireRole('teacher'), async (req, res) => {
       daysUntilDue: daysUntilDue ?? 7,
       customTolerance: customTolerance ?? 0.01,
       customToleranceType: customToleranceType || 'absolute',
+      calculatorPolicy: calculatorPolicy || 'guided',
     });
     res.status(201).json({ success: true, data: doc });
   } catch (error) {
