@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Assignment = require('../models/Assignment');
 const Course = require('../models/Course');
+const User = require('../models/User');
 const TaskTemplate = require('../models/TaskTemplate');
 const Submission = require('../models/Submission');
 const auth = require('../middleware/auth');
@@ -9,6 +10,18 @@ const requireRole = require('../middleware/role');
 const Audit = require('../models/Audit');
 const { getTemplateByToolKey } = require('../utils/ensureMvpTemplates');
 const { includesId } = require('../utils/objectId');
+const { ASSIGNMENT_PRESETS } = require('../utils/assignmentPresets');
+const { createNotification, notifyCourseStudents } = require('../utils/notifications');
+
+async function assertAssignmentAccess(assignment, req) {
+  const course = await Course.findById(assignment.course);
+  const isCourseOwner = course && course.owner.toString() === req.userId;
+  const isCreator = assignment.createdBy.toString() === req.userId;
+  if (!isCreator && !isCourseOwner && req.userRole !== 'admin') {
+    return { ok: false, status: 403, message: 'Нямате права' };
+  }
+  return { ok: true, course };
+}
 
 // Get all assignments for teacher
 router.get('/', auth, requireRole('teacher'), async (req, res) => {
@@ -46,23 +59,44 @@ router.get('/', auth, requireRole('teacher'), async (req, res) => {
   }
 });
 
+// Built-in assignment presets
+router.get('/presets/list', auth, requireRole('teacher'), async (req, res) => {
+  res.json({ success: true, data: ASSIGNMENT_PRESETS });
+});
+
 // Pending submissions across all teacher assignments
 router.get('/review-queue/list', auth, requireRole('teacher'), async (req, res) => {
   try {
+    const { course, late, manualOnly, sort } = req.query;
     const assignmentQuery = req.userRole === 'admin' ? {} : { createdBy: req.userId };
+    if (course) assignmentQuery.course = course;
+
     const assignments = await Assignment.find(assignmentQuery).select('_id');
     const assignmentIds = assignments.map((a) => a._id);
 
-    const submissions = await Submission.find({
+    const submissionFilter = {
       assignment: { $in: assignmentIds },
-      status: { $in: ['submitted', 'needs_review'] },
-    })
+      status: manualOnly === 'true' ? 'needs_review' : { $in: ['submitted', 'needs_review'] },
+    };
+    if (late === 'true') submissionFilter.isLate = true;
+
+    const submissions = await Submission.find(submissionFilter)
       .populate('student', 'name email')
-      .populate('assignment', 'title dueDate course')
-      .sort({ submittedAt: -1 })
+      .populate({
+        path: 'assignment',
+        select: 'title dueDate course',
+        populate: { path: 'course', select: 'name code' },
+      })
+      .sort(sort === 'oldest' ? { submittedAt: 1 } : { submittedAt: -1 })
       .limit(100);
 
-    res.json({ success: true, data: submissions, count: submissions.length });
+    const enriched = submissions.map((s) => ({
+      ...s.toObject(),
+      answers: s.answers,
+      variantIndex: s.variantIndex,
+    }));
+
+    res.json({ success: true, data: enriched, count: enriched.length });
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -94,8 +128,33 @@ router.patch('/:id/status', auth, requireRole('teacher'), async (req, res) => {
       return res.status(403).json({ success: false, message: 'Нямате права' });
     }
 
+    if (status === 'active' && (!assignment.variants || assignment.variants.length === 0)) {
+      try {
+        await assignment.generateVariants();
+      } catch (genErr) {
+        return res.status(400).json({
+          success: false,
+          message: 'Неуспешно генериране на варианти при публикуване',
+          error: genErr.message,
+        });
+      }
+    }
+
     assignment.status = status;
     await assignment.save();
+
+    if (status === 'active') {
+      const courseDoc = await Course.findById(assignment.course);
+      if (courseDoc) {
+        await notifyCourseStudents(courseDoc, {
+          type: 'assignment_created',
+          title: `Ново задание: ${assignment.title}`,
+          body: `Краен срок: ${new Date(assignment.dueDate).toLocaleDateString('bg-BG')}`,
+          link: `/classroom/assignments/${assignment._id}`,
+          meta: { assignmentId: assignment._id },
+        });
+      }
+    }
 
     const statusMessages = {
       archived: 'Заданието е архивирано',
@@ -246,6 +305,7 @@ router.post('/', auth, requireRole('teacher'), async (req, res) => {
       dueDate: new Date(dueDate),
       createdBy: req.userId,
       status: requestedStatus === 'draft' ? 'draft' : 'active',
+      publishAt: req.body.publishAt ? new Date(req.body.publishAt) : null,
       options: {
         allowLateSubmissions: options?.allowLateSubmissions ?? true,
         lateSubmissionPenalty: options?.lateSubmissionPenalty ?? 0.1,
@@ -263,15 +323,25 @@ router.post('/', auth, requireRole('teacher'), async (req, res) => {
 
     await assignment.save();
 
-    // Generate variants
-    try {
-      await assignment.generateVariants();
-    } catch (error) {
-      return res.status(400).json({
-        success: false,
-        message: 'Грешка при генериране на вариантите',
-        error: error.message,
-        detail: error.message,
+    const isDraft = assignment.status === 'draft';
+    if (!isDraft) {
+      try {
+        await assignment.generateVariants();
+      } catch (error) {
+        return res.status(400).json({
+          success: false,
+          message: 'Грешка при генериране на вариантите',
+          error: error.message,
+          detail: error.message,
+        });
+      }
+
+      await notifyCourseStudents(courseDoc, {
+        type: 'assignment_created',
+        title: `Ново задание: ${assignment.title}`,
+        body: `Краен срок: ${new Date(assignment.dueDate).toLocaleDateString('bg-BG')}`,
+        link: `/classroom/assignments/${assignment._id}`,
+        meta: { assignmentId: assignment._id },
       });
     }
 
@@ -335,12 +405,20 @@ router.put('/:id', auth, requireRole('teacher'), async (req, res) => {
     };
 
     // Update fields
-    const updateFields = ['title', 'description', 'dueDate', 'options', 'settings'];
+    const updateFields = ['title', 'description', 'dueDate', 'options', 'settings', 'publishAt'];
     updateFields.forEach(field => {
       if (req.body[field] !== undefined) {
-        assignment[field] = req.body[field];
+        assignment[field] = field === 'publishAt' && req.body.publishAt
+          ? new Date(req.body.publishAt)
+          : req.body[field];
       }
     });
+    if (req.body.options?.customTolerance !== undefined) {
+      assignment.settings = assignment.settings || {};
+      assignment.settings.customTolerance = req.body.options.customTolerance;
+      assignment.settings.customToleranceType =
+        req.body.options.customToleranceType || assignment.settings.customToleranceType;
+    }
 
     await assignment.save();
 
@@ -457,6 +535,15 @@ router.post('/:id/grade/:submissionId', auth, requireRole('teacher'), async (req
 
     await submission.save();
 
+    await createNotification({
+      userId: submission.student._id,
+      type: 'submission_graded',
+      title: `Оценено: ${submission.assignment.title}`,
+      body: feedback || `Резултат: ${score}%`,
+      link: `/classroom/assignments/${submission.assignment._id}`,
+      meta: { submissionId: submission._id, score },
+    });
+
     // Log audit
     await Audit.logOperation({
       operation: 'grade_submission',
@@ -482,6 +569,148 @@ router.post('/:id/grade/:submissionId', auth, requireRole('teacher'), async (req
       success: false,
       message: 'Грешка при оценяване на submission',
       error: error.message
+    });
+  }
+});
+
+// Publish draft (generate variants + activate)
+router.post('/:id/publish', auth, requireRole('teacher'), async (req, res) => {
+  try {
+    const assignment = await Assignment.findById(req.params.id);
+    if (!assignment) {
+      return res.status(404).json({ success: false, message: 'Заданието не е намерено' });
+    }
+    const access = await assertAssignmentAccess(assignment, req);
+    if (!access.ok) {
+      return res.status(access.status).json({ success: false, message: access.message });
+    }
+
+    if (!assignment.variants || assignment.variants.length === 0) {
+      await assignment.generateVariants();
+    }
+    assignment.status = 'active';
+    if (req.body.publishAt) assignment.publishAt = new Date(req.body.publishAt);
+    await assignment.save();
+
+    if (access.course) {
+      await notifyCourseStudents(access.course, {
+        type: 'assignment_created',
+        title: `Ново задание: ${assignment.title}`,
+        body: `Краен срок: ${new Date(assignment.dueDate).toLocaleDateString('bg-BG')}`,
+        link: `/classroom/assignments/${assignment._id}`,
+        meta: { assignmentId: assignment._id },
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Заданието е публикувано',
+      data: assignment,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Грешка при публикуване',
+      error: error.message,
+    });
+  }
+});
+
+// Duplicate assignment
+router.post('/:id/duplicate', auth, requireRole('teacher'), async (req, res) => {
+  try {
+    const source = await Assignment.findById(req.params.id).populate('taskTemplate');
+    if (!source) {
+      return res.status(404).json({ success: false, message: 'Заданието не е намерено' });
+    }
+    const access = await assertAssignmentAccess(source, req);
+    if (!access.ok) {
+      return res.status(access.status).json({ success: false, message: access.message });
+    }
+
+    const copy = new Assignment({
+      title: `${source.title} (копие)`,
+      description: source.description,
+      taskTemplate: source.taskTemplate._id || source.taskTemplate,
+      course: source.course,
+      variantsCount: source.variantsCount,
+      dueDate: source.dueDate,
+      createdBy: req.userId,
+      status: 'draft',
+      options: source.options ? JSON.parse(JSON.stringify(source.options)) : {},
+      settings: source.settings ? JSON.parse(JSON.stringify(source.settings)) : {},
+      variants: [],
+    });
+    await copy.save();
+
+    res.status(201).json({
+      success: true,
+      message: 'Черновата копие е създадена',
+      data: copy,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Грешка при дублиране',
+      error: error.message,
+    });
+  }
+});
+
+// Export grades as CSV
+router.get('/:id/export-grades', auth, requireRole('teacher'), async (req, res) => {
+  try {
+    const assignment = await Assignment.findById(req.params.id).populate('course', 'name code students');
+    if (!assignment) {
+      return res.status(404).json({ success: false, message: 'Заданието не е намерено' });
+    }
+    const access = await assertAssignmentAccess(assignment, req);
+    if (!access.ok) {
+      return res.status(access.status).json({ success: false, message: access.message });
+    }
+
+    const submissions = await Submission.find({ assignment: assignment._id })
+      .populate('student', 'name email')
+      .sort({ submittedAt: -1 });
+
+    const latestByStudent = new Map();
+    submissions.forEach((s) => {
+      const sid = s.student._id.toString();
+      if (!latestByStudent.has(sid)) latestByStudent.set(sid, s);
+    });
+
+    const escape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const header = ['Име', 'Имейл', 'Статус', 'Точки', 'Късно', 'Предадено', 'Опит'].join(',');
+    const rows = [header];
+
+    const students = await User.find({ _id: { $in: assignment.course.students || [] } }).select('name email');
+    students.forEach((student) => {
+      const sub = latestByStudent.get(student._id.toString());
+      rows.push(
+        [
+          escape(student.name),
+          escape(student.email),
+          escape(sub?.status || 'not_submitted'),
+          sub?.finalScore != null ? sub.finalScore : '',
+          sub?.isLate ? 'да' : 'не',
+          sub?.submittedAt ? new Date(sub.submittedAt).toISOString() : '',
+          sub?.attemptNumber || 0,
+        ].join(',')
+      );
+    });
+
+    const csv = '\uFEFF' + rows.join('\n');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="grades-${assignment._id}.csv"`
+    );
+    res.send(csv);
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Грешка при експорт',
+      error: error.message,
     });
   }
 });

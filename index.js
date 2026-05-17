@@ -26,7 +26,11 @@ const courseRoutes = require('./routes/courses');
 const studentAssignmentRoutes = require('./routes/studentAssignments');
 const studentCourseRoutes = require('./routes/studentCourses');
 const classroomOverviewRoutes = require('./routes/classroomOverview');
+const notificationsRoutes = require('./routes/notifications');
+const teacherAccessRoutes = require('./routes/teacherAccess');
+const teacherTemplatesRoutes = require('./routes/teacherTemplates');
 const scanRoutes = require('./routes/scan');
+const { startDueSoonScheduler } = require('./utils/dueSoonScheduler');
 const { ensureMvpTemplates } = require('./utils/ensureMvpTemplates');
 
 const app = express();
@@ -61,6 +65,9 @@ app.use('/api/teacher/assignments', assignmentRoutes);
 app.use('/api/teacher/classroom', classroomOverviewRoutes);
 app.use('/api/student/assignments', studentAssignmentRoutes);
 app.use('/api/student/courses', studentCourseRoutes);
+app.use('/api/notifications', notificationsRoutes);
+app.use('/api/teacher-access', teacherAccessRoutes);
+app.use('/api/teacher/templates', teacherTemplatesRoutes);
 app.use('/api/scan', scanRoutes);
 app.use('/api/billing', billingRoutes);
 
@@ -87,6 +94,7 @@ mongoose.connect(process.env.MONGODB_URI, {
     } catch (e) {
       console.warn('Edu: MVP template seed skipped:', e.message);
     }
+    startDueSoonScheduler();
     const PORT = process.env.PORT || 5000;
     app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 }).catch(err => console.error("MongoDB connection error:", err));

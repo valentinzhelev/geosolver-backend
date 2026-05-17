@@ -1,0 +1,49 @@
+/** Built-in assignment presets for teachers (toolKey + defaults). */
+const ASSIGNMENT_PRESETS = [
+  {
+    id: 'week-first-task',
+    titleBg: 'Седмица — Първа основна задача',
+    titleEn: 'Week — First basic task',
+    toolKey: 'first-basic-task',
+    variantsCount: 3,
+    daysUntilDue: 7,
+    maxAttempts: 3,
+    customTolerance: 0.01,
+    customToleranceType: 'absolute',
+  },
+  {
+    id: 'week-second-task',
+    titleBg: 'Седмица — Втора основна задача',
+    titleEn: 'Week — Second basic task',
+    toolKey: 'second-basic-task',
+    variantsCount: 3,
+    daysUntilDue: 7,
+    maxAttempts: 3,
+    customTolerance: 0.01,
+    customToleranceType: 'absolute',
+  },
+  {
+    id: 'week-forward',
+    titleBg: 'Седмица — Права засечка',
+    titleEn: 'Week — Forward intersection',
+    toolKey: 'forward-intersection',
+    variantsCount: 2,
+    daysUntilDue: 10,
+    maxAttempts: 2,
+    customTolerance: 0.01,
+    customToleranceType: 'absolute',
+  },
+  {
+    id: 'week-resection',
+    titleBg: 'Седмица — Обратна засечка',
+    titleEn: 'Week — Resection',
+    toolKey: 'resection',
+    variantsCount: 2,
+    daysUntilDue: 10,
+    maxAttempts: 2,
+    customTolerance: 0.01,
+    customToleranceType: 'absolute',
+  },
+];
+
+module.exports = { ASSIGNMENT_PRESETS };

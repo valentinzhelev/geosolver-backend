@@ -31,6 +31,10 @@ const assignmentSchema = new mongoose.Schema({
     type: Date,
     required: true
   },
+  publishAt: {
+    type: Date,
+    default: null
+  },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -185,7 +189,10 @@ assignmentSchema.methods.getVariant = function(variantIndex) {
 
 // Method to check if assignment is active
 assignmentSchema.methods.isActive = function() {
-  return this.status === 'active' && new Date() <= this.dueDate;
+  const now = new Date();
+  if (this.status !== 'active') return false;
+  if (this.publishAt && now < new Date(this.publishAt)) return false;
+  return now <= this.dueDate;
 };
 
 // Method to check if late submissions are allowed

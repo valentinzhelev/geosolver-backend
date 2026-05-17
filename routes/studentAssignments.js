@@ -8,6 +8,9 @@ const auth = require('../middleware/auth');
 const requireRole = require('../middleware/role');
 const Audit = require('../models/Audit');
 const { includesId } = require('../utils/objectId');
+const { getStudentAssignmentStatus } = require('../utils/studentAssignmentStatus');
+const { createNotification } = require('../utils/notifications');
+const User = require('../models/User');
 
 // Get assignments for student
 router.get('/assignments', auth, requireRole('student'), async (req, res) => {
@@ -35,18 +38,24 @@ router.get('/assignments', auth, requireRole('student'), async (req, res) => {
     // Add submission status for each assignment
     const assignmentsWithStatus = await Promise.all(
       assignments.map(async (assignment) => {
-        const submission = await Submission.findOne({
+        const submissions = await Submission.find({
           assignment: assignment._id,
-          student: req.userId
+          student: req.userId,
         }).sort({ submittedAt: -1 });
+        const latest = submissions[0] || null;
+        const studentStatus = getStudentAssignmentStatus(assignment, submissions);
 
         return {
           ...assignment.toObject(),
-          submissionStatus: submission ? submission.status : 'not_submitted',
-          submissionScore: submission ? submission.finalScore : null,
-          submissionCount: submission ? submission.attemptNumber : 0,
-          canSubmit: assignment.isActive() || assignment.isLateSubmissionAllowed(),
-          isLate: submission ? submission.isLate : false
+          submissionStatus: latest ? latest.status : 'not_submitted',
+          studentStatus,
+          submissionScore: latest ? latest.finalScore : null,
+          submissionCount: submissions.length,
+          maxAttempts: assignment.options?.maxAttempts ?? 3,
+          canSubmit:
+            (assignment.isActive() || assignment.isLateSubmissionAllowed()) &&
+            submissions.length < (assignment.options?.maxAttempts ?? 3),
+          isLate: latest ? latest.isLate : false,
         };
       })
     );
@@ -88,11 +97,12 @@ router.get('/assignments/:id', auth, requireRole('student'), async (req, res) =>
       });
     }
 
-    // Get student's submission if exists
-    const submission = await Submission.findOne({
+    const submissions = await Submission.find({
       assignment: assignment._id,
-      student: req.userId
+      student: req.userId,
     }).sort({ submittedAt: -1 });
+    const submission = submissions[0] || null;
+    const studentStatus = getStudentAssignmentStatus(assignment, submissions);
 
     // Prepare assignment data for student (without solutions)
     const studentAssignment = {
@@ -111,8 +121,13 @@ router.get('/assignments/:id', auth, requireRole('student'), async (req, res) =>
         attemptNumber: submission.attemptNumber,
         isLate: submission.isLate
       } : null,
-      canSubmit: assignment.isActive() || assignment.isLateSubmissionAllowed(),
-      timeRemaining: assignment.dueDate - new Date()
+      studentStatus,
+      submissionCount: submissions.length,
+      maxAttempts: assignment.options?.maxAttempts ?? 3,
+      canSubmit:
+        (assignment.isActive() || assignment.isLateSubmissionAllowed()) &&
+        submissions.length < (assignment.options?.maxAttempts ?? 3),
+      timeRemaining: assignment.dueDate - new Date(),
     };
 
     res.json({
@@ -219,6 +234,16 @@ router.post('/assignments/:id/submit', auth, requireRole('student'), async (req,
     }
 
     await submission.save();
+
+    const studentUser = await User.findById(req.userId).select('name email');
+    await createNotification({
+      userId: assignment.createdBy,
+      type: 'submission_received',
+      title: `Ново предаване: ${assignment.title}`,
+      body: `От ${studentUser?.name || studentUser?.email || 'ученик'}`,
+      link: `/classroom/review?assignment=${assignment._id}`,
+      meta: { submissionId: submission._id, assignmentId: assignment._id },
+    });
 
     // Update assignment statistics
     assignment.statistics.totalSubmissions += 1;

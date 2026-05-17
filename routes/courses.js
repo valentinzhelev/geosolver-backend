@@ -488,6 +488,146 @@ router.delete('/:id', auth, requireRole('teacher'), async (req, res) => {
   }
 });
 
+// Export all grades for a course (CSV)
+router.get('/:id/export-grades', auth, requireRole('teacher'), async (req, res) => {
+  try {
+    const course = await Course.findById(req.params.id);
+    if (!course) {
+      return res.status(404).json({ success: false, message: 'Курсът не е намерен' });
+    }
+    if (course.owner.toString() !== req.userId && req.userRole !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Нямате права' });
+    }
+
+    const Assignment = require('../models/Assignment');
+    const Submission = require('../models/Submission');
+    const User = require('../models/User');
+
+    const assignments = await Assignment.find({ course: course._id, status: { $ne: 'archived' } });
+    const students = await User.find({ _id: { $in: course.students } }).select('name email');
+
+    const escape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const rows = [
+      ['Група', 'Ученик', 'Имейл', 'Задание', 'Статус', 'Точки', 'Късно', 'Предадено'].join(','),
+    ];
+
+    for (const student of students) {
+      for (const a of assignments) {
+        const sub = await Submission.findOne({ assignment: a._id, student: student._id }).sort({
+          submittedAt: -1,
+        });
+        rows.push(
+          [
+            escape(course.name),
+            escape(student.name),
+            escape(student.email),
+            escape(a.title),
+            escape(sub?.status || 'not_submitted'),
+            sub?.finalScore != null ? sub.finalScore : '',
+            sub?.isLate ? 'да' : 'не',
+            sub?.submittedAt ? new Date(sub.submittedAt).toISOString() : '',
+          ].join(',')
+        );
+      }
+    }
+
+    const csv = '\uFEFF' + rows.join('\n');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="group-${course.code}-grades.csv"`);
+    res.send(csv);
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Group analytics (per assignment + student summary)
+router.get('/:id/analytics', auth, requireRole('teacher'), async (req, res) => {
+  try {
+    const course = await Course.findById(req.params.id).populate('students', 'name email');
+    if (!course) {
+      return res.status(404).json({ success: false, message: 'Курсът не е намерен' });
+    }
+    if (course.owner.toString() !== req.userId && req.userRole !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Нямате достъп' });
+    }
+
+    const Assignment = require('../models/Assignment');
+    const Submission = require('../models/Submission');
+
+    const assignments = await Assignment.find({
+      course: course._id,
+      status: { $in: ['active', 'completed'] },
+    }).select('title dueDate status statistics');
+
+    const assignmentIds = assignments.map((a) => a._id);
+    const submissions = await Submission.find({ assignment: { $in: assignmentIds } })
+      .populate('student', 'name email')
+      .select('student assignment finalScore status isLate submittedAt');
+
+    const byAssignment = assignments.map((a) => {
+      const subs = submissions.filter((s) => s.assignment.toString() === a._id.toString());
+      const graded = subs.filter((s) => s.status === 'graded' || s.finalScore != null);
+      const avg =
+        graded.length > 0
+          ? graded.reduce((sum, s) => sum + (s.finalScore || 0), 0) / graded.length
+          : 0;
+      const studentCount = course.students.length;
+      const submittedStudents = new Set(subs.map((s) => s.student._id.toString())).size;
+      return {
+        assignmentId: a._id,
+        title: a.title,
+        dueDate: a.dueDate,
+        status: a.status,
+        submissionCount: subs.length,
+        submittedStudents,
+        completionRate: studentCount > 0 ? (submittedStudents / studentCount) * 100 : 0,
+        averageScore: Math.round(avg * 10) / 10,
+        lateCount: subs.filter((s) => s.isLate).length,
+        needsReview: subs.filter((s) => s.status === 'needs_review').length,
+      };
+    });
+
+    const studentSummaries = (course.students || []).map((student) => {
+      const sid = student._id.toString();
+      const studentSubs = submissions.filter((s) => s.student._id.toString() === sid);
+      const scores = studentSubs.filter((s) => s.finalScore != null).map((s) => s.finalScore);
+      const avg = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
+      return {
+        studentId: student._id,
+        name: student.name,
+        email: student.email,
+        submissions: studentSubs.length,
+        averageScore: avg != null ? Math.round(avg * 10) / 10 : null,
+      };
+    });
+
+    res.json({
+      success: true,
+      data: {
+        course: { id: course._id, name: course.name, code: course.code, studentCount: course.students.length },
+        assignments: byAssignment,
+        students: studentSummaries,
+        totals: {
+          assignments: assignments.length,
+          submissions: submissions.length,
+          averageScore:
+            submissions.length > 0
+              ? Math.round(
+                  (submissions.reduce((s, x) => s + (x.finalScore || 0), 0) / submissions.length) * 10
+                ) / 10
+              : 0,
+        },
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Грешка при аналитиката',
+      error: error.message,
+    });
+  }
+});
+
 // Get course statistics
 router.get('/:id/stats', auth, async (req, res) => {
   try {
