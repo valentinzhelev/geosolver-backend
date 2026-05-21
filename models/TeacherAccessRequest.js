@@ -12,6 +12,7 @@ const teacherAccessRequestSchema = new mongoose.Schema(
     reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     reviewedAt: { type: Date },
     adminNote: { type: String, default: '' },
+    archived: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

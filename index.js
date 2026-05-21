@@ -32,6 +32,7 @@ const teacherTemplatesRoutes = require('./routes/teacherTemplates');
 const scanRoutes = require('./routes/scan');
 const { startDueSoonScheduler } = require('./utils/dueSoonScheduler');
 const { ensureMvpTemplates } = require('./utils/ensureMvpTemplates');
+const localeMiddleware = require('./middleware/locale');
 
 const app = express();
 app.use(cors({
@@ -42,6 +43,7 @@ app.use(cors({
 // Stripe webhook needs raw body – must be before express.json()
 app.use('/api/webhooks/stripe', express.raw({ type: 'application/json' }), webhooksRoutes.stripeWebhookHandler);
 app.use(express.json());
+app.use(localeMiddleware);
 
 app.use("/api/history", historyRoutes);
 app.use("/api/auth", authRoutes);
