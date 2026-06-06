@@ -11,7 +11,7 @@ function getUserIdFromRequest(req) {
   if (!token) return null;
   try {
     const jwt = require('jsonwebtoken');
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
     return decoded.id;
   } catch {
     return null;
