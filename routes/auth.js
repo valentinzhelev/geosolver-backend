@@ -5,7 +5,7 @@ const User = require('../models/User');
 const auth = require('../middleware/auth');
 const requireRole = require('../middleware/role');
 const crypto = require('crypto');
-const { sendMail, isConfigured, isSmtpConnectionError } = require('../utils/mailer');
+const { sendMail, isConfigured, isEmailDeliveryError } = require('../utils/mailer');
 const { getFrontendUrl, getApiPublicUrl } = require('../utils/appUrls');
 const { verificationEmail, resetPasswordEmail } = require('../utils/emailTemplates');
 
@@ -188,9 +188,9 @@ router.post('/forgot-password', async (req, res) => {
     res.json({ message: 'Ако имейлът съществува, ще получите инструкции за възстановяване.' });
   } catch (err) {
     console.error('Forgot password error:', err.message || err);
-    if (isSmtpConnectionError(err)) {
+    if (isEmailDeliveryError(err)) {
       return res.status(503).json({
-        message: 'Имейл сървърът не отговаря в момента. Опитайте порт 587 в настройките или пишете на team@geosolver.bg.',
+        message: 'Имейл услугата не отговаря в момента. Моля, пишете на team@geosolver.bg.',
       });
     }
     res.status(500).json({ message: 'Грешка при заявка за нова парола.' });

@@ -9,7 +9,7 @@ const { sendMail, isConfigured } = require('../utils/mailer');
 const to = process.argv[2] || process.env.SMTP_USER;
 
 if (!isConfigured()) {
-  console.error('SMTP not configured. Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS in .env');
+  console.error('Email not configured. Set BREVO_API_KEY or SMTP_* in .env');
   process.exit(1);
 }
 

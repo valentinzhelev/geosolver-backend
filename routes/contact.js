@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { sendMail, isConfigured, isSmtpConnectionError } = require('../utils/mailer');
+const { sendMail, isConfigured, isEmailDeliveryError } = require('../utils/mailer');
 
 function escapeHtml(text) {
   if (typeof text !== 'string') return '';
@@ -60,9 +60,9 @@ router.post('/', async (req, res) => {
     res.json({ message: 'Съобщението е изпратено успешно!' });
   } catch (err) {
     console.error('Email error:', err.message || err);
-    if (isSmtpConnectionError(err)) {
+    if (isEmailDeliveryError(err)) {
       return res.status(503).json({
-        message: 'Имейл сървърът не отговаря. Моля, пишете директно на team@geosolver.bg.',
+        message: 'Имейл услугата не отговаря. Моля, пишете директно на team@geosolver.bg.',
       });
     }
     res.status(500).json({ message: 'Грешка при изпращане на съобщението.' });
