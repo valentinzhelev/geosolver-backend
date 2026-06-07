@@ -1,5 +1,7 @@
 const nodemailer = require('nodemailer');
 
+const SMTP_TIMEOUT_MS = Number(process.env.SMTP_TIMEOUT_MS || 12000);
+
 function isConfigured() {
   return !!(
     process.env.SMTP_HOST &&
@@ -13,6 +15,7 @@ function createTransporter() {
   if (!isConfigured()) return null;
   const port = Number(process.env.SMTP_PORT);
   const secure = process.env.SMTP_SECURE === 'true';
+
   return nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port,
@@ -21,9 +24,10 @@ function createTransporter() {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS,
     },
-    // Port 587 STARTTLS
+    connectionTimeout: SMTP_TIMEOUT_MS,
+    greetingTimeout: SMTP_TIMEOUT_MS,
+    socketTimeout: SMTP_TIMEOUT_MS,
     ...(port === 587 && !secure ? { requireTLS: true } : {}),
-    // Self-signed certs on some shared hosts
     tls: process.env.SMTP_TLS_REJECT_UNAUTHORIZED === 'false'
       ? { rejectUnauthorized: false }
       : undefined,
@@ -31,6 +35,12 @@ function createTransporter() {
 }
 
 const transporter = createTransporter();
+
+function isSmtpConnectionError(err) {
+  const code = err?.code || '';
+  return ['ETIMEDOUT', 'ESOCKET', 'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND'].includes(code)
+    || /timeout|timed out/i.test(err?.message || '');
+}
 
 async function verifyConnection() {
   if (!transporter) throw new Error('SMTP not configured');
@@ -46,8 +56,8 @@ function sendMail({ to, subject, html, replyTo }) {
     to,
     subject,
     html,
-    replyTo: replyTo || process.env.MAIL_REPLY_TO || process.env.MAIL_FROM || 'team@geosolver.bg',
+    replyTo: replyTo || process.env.MAIL_REPLY_TO || 'team@geosolver.bg',
   });
 }
 
-module.exports = { sendMail, isConfigured, verifyConnection };
+module.exports = { sendMail, isConfigured, verifyConnection, isSmtpConnectionError };
