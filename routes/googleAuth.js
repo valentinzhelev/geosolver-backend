@@ -1,80 +1,97 @@
 const express = require('express');
+const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
 const { OAuth2Client } = require('google-auth-library');
-const User = require('../models/User');
 const jwt = require('jsonwebtoken');
+const User = require('../models/User');
+
 const router = express.Router();
 
-// Initialize OAuth2Client with both client ID and secret
-const client = new OAuth2Client(
-  process.env.GOOGLE_CLIENT_ID,
-  process.env.GOOGLE_CLIENT_SECRET
-);
+function getGoogleClientIds() {
+  const ids = [
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_ID_ALT,
+  ].filter(Boolean);
+  return [...new Set(ids)];
+}
 
-// Google OAuth login
+const client = new OAuth2Client();
+
+async function verifyGoogleIdToken(idToken) {
+  const audiences = getGoogleClientIds();
+  if (!audiences.length) {
+    const err = new Error('Google OAuth not configured');
+    err.code = 'NOT_CONFIGURED';
+    throw err;
+  }
+
+  const ticket = await client.verifyIdToken({
+    idToken,
+    audience: audiences.length === 1 ? audiences[0] : audiences,
+  });
+  return ticket.getPayload();
+}
+
+// POST /api/google-auth/login
 router.post('/login', async (req, res) => {
   try {
     const { token } = req.body;
 
     if (!token) {
-      return res.status(400).json({ message: 'Google token is required' });
+      return res.status(400).json({ message: 'Липсва Google токен.' });
     }
 
-    if (!process.env.GOOGLE_CLIENT_ID) {
-      return res.status(500).json({ message: 'Google OAuth not configured' });
+    if (!process.env.JWT_SECRET) {
+      return res.status(500).json({ message: 'Сървърът не е конфигуриран за вход.' });
     }
 
-    // Verify the Google token
-    const ticket = await client.verifyIdToken({
-      idToken: token,
-      audience: process.env.GOOGLE_CLIENT_ID
-    });
-
-    const payload = ticket.getPayload();
+    const payload = await verifyGoogleIdToken(token);
     const { email, name, picture, sub: googleId } = payload;
 
-    // Check if user exists
+    if (!email || !googleId) {
+      return res.status(401).json({ message: 'Невалиден Google профил.' });
+    }
+
     let user = await User.findOne({ email });
 
     if (!user) {
-      // Create new user
-      user = new User({
-        name,
+      const hashed = await bcrypt.hash(`google_${googleId}`, 10);
+      user = await User.create({
+        name: name || email.split('@')[0],
         email,
-        password: `google_${googleId}`, // Placeholder password for Google users
-        isVerified: true, // Google users are pre-verified
-        googleId: googleId,
-        profilePicture: picture
+        password: hashed,
+        role: 'student',
+        isVerified: true,
+        googleId,
+        profilePicture: picture || undefined,
+        refreshTokens: [],
       });
-      await user.save();
     } else {
-      // Update existing user's Google info if needed
       if (!user.googleId) {
         user.googleId = googleId;
         user.isVerified = true;
-        if (picture) user.profilePicture = picture;
-        await user.save();
       }
+      if (picture && !user.profilePicture) {
+        user.profilePicture = picture;
+      }
+      if (name && user.name !== name) {
+        user.name = name;
+      }
+      await user.save();
     }
 
-    // Generate JWT tokens
-    const accessToken = jwt.sign(
-      { id: user._id, email: user.email },
-      process.env.JWT_SECRET,
-      { expiresIn: '1h' }
-    );
-
-    const refreshToken = jwt.sign(
-      { id: user._id },
-      process.env.JWT_REFRESH_SECRET,
-      { expiresIn: '7d' }
-    );
-
-    // Save refresh token
+    const refreshToken = crypto.randomBytes(40).toString('hex');
     user.refreshTokens.push(refreshToken);
     await user.save();
 
+    const accessToken = jwt.sign(
+      { id: user._id, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: '15m' }
+    );
+
     res.json({
-      message: 'Google login successful',
+      message: 'Успешен вход с Google.',
       token: accessToken,
       refreshToken,
       user: {
@@ -82,36 +99,33 @@ router.post('/login', async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
-        profilePicture: user.profilePicture
-      }
+        isVerified: user.isVerified,
+        profilePicture: user.profilePicture,
+      },
     });
-
   } catch (error) {
-    console.error('Google login error details:', error);
-    console.error('Error message:', error.message);
-    console.error('Error stack:', error.stack);
-    
-    if (error.message.includes('Invalid token')) {
-      res.status(401).json({ message: 'Invalid Google token' });
-    } else if (error.message.includes('Token used too late')) {
-      res.status(401).json({ message: 'Token expired' });
-    } else {
-      res.status(500).json({ message: 'Google authentication failed', error: error.message });
+    console.error('Google login error:', error.message);
+
+    if (error.code === 'NOT_CONFIGURED') {
+      return res.status(500).json({ message: 'Google входът не е конфигуриран на сървъра.' });
     }
+
+    const msg = error.message || '';
+    if (
+      msg.includes('Invalid token')
+      || msg.includes('Wrong number of segments')
+      || msg.includes('Token used too late')
+      || msg.includes('audience')
+    ) {
+      return res.status(401).json({ message: 'Невалиден или изтекъл Google токен.' });
+    }
+
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({ message: 'Данните от Google профила не могат да бъдат записани.' });
+    }
+
+    res.status(500).json({ message: 'Грешка при Google вход.' });
   }
-});
-
-// Get Google OAuth URL (for server-side flow if needed)
-router.get('/url', (req, res) => {
-  const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
-    `client_id=${process.env.GOOGLE_CLIENT_ID}&` +
-    `redirect_uri=${process.env.GOOGLE_REDIRECT_URI}&` +
-    `response_type=code&` +
-    `scope=openid email profile&` +
-    `access_type=offline&` +
-    `prompt=consent`;
-
-  res.json({ authUrl });
 });
 
 module.exports = router;
