@@ -31,6 +31,18 @@ function parseFromAddress(fromStr) {
   return { name: 'GeoSolver', email: raw.trim() };
 }
 
+/** Brevo requires a verified sender. Use BREVO_SENDER_EMAIL until geosolver.bg domain is verified. */
+function getBrevoSender() {
+  const verified = process.env.BREVO_SENDER_EMAIL?.trim();
+  if (verified) {
+    return {
+      name: process.env.BREVO_SENDER_NAME?.trim() || 'GeoSolver',
+      email: verified,
+    };
+  }
+  return parseFromAddress(process.env.MAIL_FROM);
+}
+
 function createTransporter() {
   if (!hasSmtp()) return null;
   const port = Number(process.env.SMTP_PORT);
@@ -67,7 +79,7 @@ function isEmailDeliveryError(err) {
 }
 
 async function sendViaBrevoApi({ to, subject, html, replyTo }) {
-  const sender = parseFromAddress(process.env.MAIL_FROM);
+  const sender = getBrevoSender();
   const body = {
     sender,
     to: [{ email: to }],
@@ -87,14 +99,23 @@ async function sendViaBrevoApi({ to, subject, html, replyTo }) {
     body: JSON.stringify(body),
   });
 
+  const text = await res.text().catch(() => '');
   if (!res.ok) {
-    const text = await res.text().catch(() => '');
+    console.error('Brevo API error:', res.status, text.slice(0, 300));
     const err = new Error(`Brevo API ${res.status}: ${text.slice(0, 200)}`);
     err.code = 'BREVO_API_ERROR';
     throw err;
   }
 
-  return { messageId: `brevo-${Date.now()}` };
+  let messageId = `brevo-${Date.now()}`;
+  try {
+    const data = JSON.parse(text);
+    if (data.messageId) messageId = data.messageId;
+  } catch {
+    // 204 empty body is ok
+  }
+  console.log('Brevo email queued:', { to, from: sender.email, messageId });
+  return { messageId };
 }
 
 async function sendViaSmtp({ to, subject, html, replyTo }) {
