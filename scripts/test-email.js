@@ -5,6 +5,7 @@
  */
 require('dotenv').config();
 const { sendMail, isConfigured } = require('../utils/mailer');
+const { resetPasswordEmail } = require('../utils/emailTemplates');
 
 const to = process.argv[2] || process.env.SMTP_USER;
 
@@ -13,10 +14,16 @@ if (!isConfigured()) {
   process.exit(1);
 }
 
+const mail = resetPasswordEmail({
+  name: 'Тест',
+  resetUrl: `${(process.env.FRONTEND_URL || 'https://www.geosolver.bg').replace(/\/$/, '')}/reset-password?token=preview`,
+});
+
 sendMail({
   to,
-  subject: 'GeoSolver — SMTP test',
-  html: '<p>Ако виждате този имейл, SMTP конфигурацията работи.</p>',
+  subject: mail.subject,
+  html: mail.html,
+  tags: ['test'],
 })
   .then((info) => {
     console.log('Email sent to', to);
