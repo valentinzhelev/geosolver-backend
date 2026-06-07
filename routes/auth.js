@@ -11,17 +11,23 @@ const { verificationEmail, resetPasswordEmail } = require('../utils/emailTemplat
 
 const router = express.Router();
 
+function purposeToRole(purpose) {
+  if (purpose === 'teacher') return 'teacher';
+  return 'student';
+}
+
 // POST /api/auth/register
 router.post('/register', async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password, purpose } = req.body;
     if (!name || !email || !password) return res.status(400).json({ message: 'Всички полета са задължителни.' });
     const existing = await User.findOne({ email });
     if (existing) return res.status(409).json({ message: 'Имейлът вече е регистриран.' });
     const hashed = await bcrypt.hash(password, 10);
     const refreshToken = crypto.randomBytes(40).toString('hex');
     const verificationToken = crypto.randomBytes(32).toString('hex');
-    const user = await User.create({ name, email, password: hashed, role: 'free', refreshTokens: [refreshToken], isVerified: false, verificationToken });
+    const role = purposeToRole(purpose);
+    const user = await User.create({ name, email, password: hashed, role, refreshTokens: [refreshToken], isVerified: false, verificationToken });
     const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '15m' });
 
     const verificationLink = `${getApiPublicUrl()}/api/auth/verify?token=${verificationToken}`;
