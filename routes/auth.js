@@ -5,21 +5,11 @@ const User = require('../models/User');
 const auth = require('../middleware/auth');
 const requireRole = require('../middleware/role');
 const crypto = require('crypto');
-const { sendMail } = require('../utils/mailer');
-const nodemailer = require('nodemailer');
+const { sendMail, isConfigured } = require('../utils/mailer');
+const { getFrontendUrl, getApiPublicUrl } = require('../utils/appUrls');
+const { verificationEmail, resetPasswordEmail } = require('../utils/emailTemplates');
 
 const router = express.Router();
-
-// SMTP transporter
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: Number(process.env.SMTP_PORT),
-  secure: process.env.SMTP_SECURE === 'true',
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-});
 
 // POST /api/auth/register
 router.post('/register', async (req, res) => {
@@ -33,20 +23,24 @@ router.post('/register', async (req, res) => {
     const verificationToken = crypto.randomBytes(32).toString('hex');
     const user = await User.create({ name, email, password: hashed, role: 'free', refreshTokens: [refreshToken], isVerified: false, verificationToken });
     const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '15m' });
-    // Send verificationToken via email
-    const verificationLink = `${process.env.BASE_URL || 'http://localhost:5000'}/api/auth/verify?token=${verificationToken}`;
-    await sendMail({
-      to: user.email,
-      subject: 'Потвърждение на имейл в GeoSolver',
-      html: `<p>Здравей,</p><p>Благодарим за регистрацията!</p><p>За да потвърдиш имейла си, кликни на линка по-долу:</p><p><a href="${verificationLink}">${verificationLink}</a></p>`
-    });
+
+    const verificationLink = `${getApiPublicUrl()}/api/auth/verify?token=${verificationToken}`;
+    if (isConfigured()) {
+      try {
+        const mail = verificationEmail({ name: user.name, verifyUrl: verificationLink });
+        await sendMail({ to: user.email, subject: mail.subject, html: mail.html });
+      } catch (emailErr) {
+        console.error('Verification email failed:', emailErr.message);
+      }
+    }
+
     res.status(201).json({
       user: { id: user._id, name: user.name, email: user.email, role: user.role, isVerified: user.isVerified },
       token,
       refreshToken,
-      verificationLink
     });
   } catch (err) {
+    console.error('Register error:', err);
     res.status(500).json({ message: 'Грешка при регистрация.' });
   }
 });
@@ -107,10 +101,8 @@ router.post('/refresh', async (req, res) => {
     if (!refreshToken) return res.status(400).json({ message: 'Липсва refresh token.' });
     const user = await User.findOne({ refreshTokens: refreshToken });
     if (!user) return res.status(401).json({ message: 'Невалиден refresh token.' });
-    // Generate new tokens
     const newAccessToken = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '15m' });
     const newRefreshToken = crypto.randomBytes(40).toString('hex');
-    // Replace old refresh token with new one
     user.refreshTokens = user.refreshTokens.filter(t => t !== refreshToken);
     user.refreshTokens.push(newRefreshToken);
     await user.save();
@@ -156,24 +148,29 @@ router.post('/change-password', auth, async (req, res) => {
   }
 });
 
-// GET /api/auth/verify?token=...
+// GET /api/auth/verify?token=... — redirects to frontend after verification
 router.get('/verify', async (req, res) => {
+  const frontend = getFrontendUrl();
   try {
     const { token } = req.query;
-    if (!token) return res.status(400).json({ message: 'Липсва verification token.' });
+    if (!token) return res.redirect(`${frontend}/login?verified=missing`);
     const user = await User.findOne({ verificationToken: token });
-    if (!user) return res.status(400).json({ message: 'Невалиден verification token.' });
+    if (!user) return res.redirect(`${frontend}/login?verified=invalid`);
     user.isVerified = true;
     user.verificationToken = undefined;
     await user.save();
-    res.json({ message: 'Имейлът е успешно верифициран.' });
+    return res.redirect(`${frontend}/login?verified=1`);
   } catch (err) {
-    res.status(500).json({ message: 'Грешка при верификация.' });
+    console.error('Verify error:', err);
+    return res.redirect(`${frontend}/login?verified=error`);
   }
 });
 
 // POST /api/auth/forgot-password
 router.post('/forgot-password', async (req, res) => {
+  if (!isConfigured()) {
+    return res.status(503).json({ message: 'Имейл услугата не е конфигурирана. Моля, свържете се с нас на team@geosolver.bg.' });
+  }
   try {
     const { email } = req.body;
     if (!email) return res.status(400).json({ message: 'Липсва имейл.' });
@@ -181,17 +178,16 @@ router.post('/forgot-password', async (req, res) => {
     if (!user) return res.status(200).json({ message: 'Ако имейлът съществува, ще получите инструкции.' });
     const resetToken = crypto.randomBytes(32).toString('hex');
     user.resetPasswordToken = resetToken;
-    user.resetPasswordExpires = Date.now() + 1000 * 60 * 30; // 30 minutes
+    user.resetPasswordExpires = Date.now() + 1000 * 60 * 30;
     await user.save();
-    // Send email with link
-    const resetUrl = `${process.env.BASE_URL || 'https://geosolver.bg'}/reset-password?token=${resetToken}`;
-    await sendMail({
-      to: user.email,
-      subject: 'Възстановяване на парола в GeoSolver',
-      html: `<p>Здравей,</p><p>За да смениш паролата си, кликни на линка по-долу:</p><p><a href="${resetUrl}">${resetUrl}</a></p><p>Ако не си искал смяна на паролата, игнорирай този имейл.</p>`
-    });
+
+    const resetUrl = `${getFrontendUrl()}/reset-password?token=${resetToken}`;
+    const mail = resetPasswordEmail({ name: user.name, resetUrl });
+    await sendMail({ to: user.email, subject: mail.subject, html: mail.html });
+
     res.json({ message: 'Ако имейлът съществува, ще получите инструкции за възстановяване.' });
   } catch (err) {
+    console.error('Forgot password error:', err);
     res.status(500).json({ message: 'Грешка при заявка за нова парола.' });
   }
 });
@@ -214,4 +210,4 @@ router.post('/reset-password', async (req, res) => {
   }
 });
 
-module.exports = router; 
+module.exports = router;

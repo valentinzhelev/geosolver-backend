@@ -14,7 +14,7 @@ function escapeHtml(text) {
 
 router.post('/', async (req, res) => {
   if (!isConfigured()) {
-    return res.status(503).json({ message: 'Контактната форма временно не е налична. Моля, пишете на help@geosolver.bg.' });
+    return res.status(503).json({ message: 'Контактната форма временно не е налична. Моля, пишете на team@geosolver.bg.' });
   }
 
   const { email, title, content } = req.body;

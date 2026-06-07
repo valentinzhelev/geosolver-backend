@@ -137,8 +137,8 @@ const MESSAGES = {
     en: 'You do not have permission.',
   },
   CONTACT_UNAVAILABLE: {
-    bg: 'Контактната форма временно не е налична. Моля, пишете на help@geosolver.bg.',
-    en: 'The contact form is temporarily unavailable. Please email help@geosolver.bg.',
+    bg: 'Контактната форма временно не е налична. Моля, пишете на team@geosolver.bg.',
+    en: 'The contact form is temporarily unavailable. Please email team@geosolver.bg.',
   },
   CONTACT_SENT: {
     bg: 'Съобщението е изпратено успешно!',
