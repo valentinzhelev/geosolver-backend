@@ -8,6 +8,7 @@ const crypto = require('crypto');
 const { sendMail, isConfigured, isEmailDeliveryError } = require('../utils/mailer');
 const { getFrontendUrl, getApiPublicUrl } = require('../utils/appUrls');
 const { verificationEmail, resetPasswordEmail } = require('../utils/emailTemplates');
+const { sanitizeLegacyUser } = require('../utils/sanitizeLegacyUser');
 
 const router = express.Router();
 
@@ -60,6 +61,7 @@ router.post('/login', async (req, res) => {
     if (!user) return res.status(401).json({ message: 'Грешен имейл или парола.' });
     const match = await bcrypt.compare(password, user.password);
     if (!match) return res.status(401).json({ message: 'Грешен имейл или парола.' });
+    sanitizeLegacyUser(user);
     const refreshToken = crypto.randomBytes(40).toString('hex');
     user.refreshTokens.push(refreshToken);
     await user.save();

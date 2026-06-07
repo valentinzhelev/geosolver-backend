@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs');
 const { OAuth2Client } = require('google-auth-library');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const { sanitizeLegacyUser } = require('../utils/sanitizeLegacyUser');
 
 const router = express.Router();
 
@@ -52,6 +53,11 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ message: 'Невалиден Google профил.' });
     }
 
+    const linkedGoogleUser = await User.findOne({ googleId });
+    if (linkedGoogleUser && linkedGoogleUser.email !== email) {
+      return res.status(409).json({ message: 'Този Google профил е свързан с друг GeoSolver акаунт.' });
+    }
+
     let user = await User.findOne({ email });
 
     if (!user) {
@@ -67,17 +73,19 @@ router.post('/login', async (req, res) => {
         refreshTokens: [],
       });
     } else {
+      sanitizeLegacyUser(user);
+
       if (!user.googleId) {
         user.googleId = googleId;
-        user.isVerified = true;
       }
+      user.isVerified = true;
+
       if (picture && !user.profilePicture) {
         user.profilePicture = picture;
       }
       if (name && user.name !== name) {
         user.name = name;
       }
-      await user.save();
     }
 
     const refreshToken = crypto.randomBytes(40).toString('hex');
@@ -121,6 +129,7 @@ router.post('/login', async (req, res) => {
     }
 
     if (error.name === 'ValidationError') {
+      console.error('Google login validation:', error.errors);
       return res.status(400).json({ message: 'Данните от Google профила не могат да бъдат записани.' });
     }
 
