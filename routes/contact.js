@@ -52,9 +52,10 @@ router.post('/', async (req, res) => {
 
     await sendMail({
       to: process.env.CONTACT_EMAIL_TO || 'team@geosolver.bg',
-      subject: `[GeoSolver] Контактна форма: ${title.trim().slice(0, 100)}`,
+      subject: `GeoSolver — ${title.trim().slice(0, 100)}`,
       html: htmlContent,
-      replyTo: email.trim()
+      replyTo: email.trim(),
+      tags: ['contact-form'],
     });
 
     res.json({ message: 'Съобщението е изпратено успешно!' });

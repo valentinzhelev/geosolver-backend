@@ -78,13 +78,29 @@ function isEmailDeliveryError(err) {
   return isSmtpConnectionError(err) || err?.code === 'BREVO_API_ERROR';
 }
 
-async function sendViaBrevoApi({ to, subject, html, replyTo }) {
+function htmlToPlainText(html) {
+  return html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+async function sendViaBrevoApi({ to, subject, html, replyTo, tags = ['transactional'] }) {
   const sender = getBrevoSender();
   const body = {
     sender,
     to: [{ email: to }],
     subject,
     htmlContent: html,
+    textContent: htmlToPlainText(html),
+    tags,
   };
   const reply = replyTo || process.env.MAIL_REPLY_TO;
   if (reply) body.replyTo = { email: reply };
@@ -137,13 +153,13 @@ async function verifyConnection() {
   return transporter.verify();
 }
 
-async function sendMail({ to, subject, html, replyTo }) {
+async function sendMail({ to, subject, html, replyTo, tags }) {
   if (!isConfigured()) {
     throw new Error('Email not configured');
   }
   // Prefer Brevo HTTP API on cloud hosts (Railway blocks outbound SMTP ports).
   if (hasBrevoApi()) {
-    return sendViaBrevoApi({ to, subject, html, replyTo });
+    return sendViaBrevoApi({ to, subject, html, replyTo, tags });
   }
   return sendViaSmtp({ to, subject, html, replyTo });
 }

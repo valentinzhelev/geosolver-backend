@@ -28,7 +28,7 @@ router.post('/register', async (req, res) => {
     if (isConfigured()) {
       try {
         const mail = verificationEmail({ name: user.name, verifyUrl: verificationLink });
-        await sendMail({ to: user.email, subject: mail.subject, html: mail.html });
+        await sendMail({ to: user.email, subject: mail.subject, html: mail.html, tags: ['verification'] });
       } catch (emailErr) {
         console.error('Verification email failed:', emailErr.message);
       }
@@ -183,7 +183,7 @@ router.post('/forgot-password', async (req, res) => {
 
     const resetUrl = `${getFrontendUrl()}/reset-password?token=${resetToken}`;
     const mail = resetPasswordEmail({ name: user.name, resetUrl });
-    await sendMail({ to: user.email, subject: mail.subject, html: mail.html });
+    await sendMail({ to: user.email, subject: mail.subject, html: mail.html, tags: ['password-reset'] });
 
     res.json({ message: 'Ако имейлът съществува, ще получите инструкции за възстановяване.' });
   } catch (err) {
