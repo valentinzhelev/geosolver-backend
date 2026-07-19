@@ -6,6 +6,7 @@ const FieldBookProject = require('../models/FieldBookProject');
 const FieldBook = require('../models/FieldBook');
 const { computeLevelingCarnet } = require('../utils/levelingCarnet');
 const { computeCoordinateCarnet } = require('../utils/coordinateCarnet');
+const { getSharedProjectIds, getProjectAccess, getWorkspaceMembership, hasMinRole } = require('../utils/workspaceAccess');
 
 router.use(auth, requireFieldBookPilot);
 
@@ -44,7 +45,11 @@ function computeByType(type, rows, settings) {
 
 router.get('/projects', async (req, res) => {
   try {
-    const projects = await FieldBookProject.find({ user: req.userId }).sort({ updatedAt: -1 });
+    const sharedIds = await getSharedProjectIds(req.userId);
+    const filter = sharedIds.length
+      ? { $or: [{ user: req.userId }, { _id: { $in: sharedIds } }] }
+      : { user: req.userId };
+    const projects = await FieldBookProject.find(filter).sort({ updatedAt: -1 });
     res.json({ success: true, data: projects });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -53,17 +58,25 @@ router.get('/projects', async (req, res) => {
 
 router.post('/projects', async (req, res) => {
   try {
-    const { name, year, team, site, notes } = req.body;
+    const { name, year, team, site, notes, workspaceId, crs } = req.body;
     if (!name || !String(name).trim()) {
       return res.status(400).json({ success: false, message: 'Името на проекта е задължително.' });
     }
+    if (workspaceId) {
+      const wsAccess = await getWorkspaceMembership(req.userId, workspaceId);
+      if (!wsAccess.ok || !hasMinRole(wsAccess.role, 'editor')) {
+        return res.status(403).json({ success: false, message: 'Нямате права за този workspace.' });
+      }
+    }
     const project = await FieldBookProject.create({
       user: req.userId,
+      workspace: workspaceId || null,
       name: String(name).trim(),
       year: year || '',
       team: team || '',
       site: site || '',
       notes: notes || '',
+      crs: crs || 'EPSG:7801',
     });
     res.status(201).json({ success: true, data: project });
   } catch (error) {
@@ -73,14 +86,28 @@ router.post('/projects', async (req, res) => {
 
 router.patch('/projects/:id', async (req, res) => {
   try {
-    const project = await FieldBookProject.findOne({ _id: req.params.id, user: req.userId });
-    if (!project) {
+    const access = await getProjectAccess(req.userId, req.params.id);
+    if (!access.ok || !hasMinRole(access.role, 'editor')) {
       return res.status(404).json({ success: false, message: 'Проектът не е намерен.' });
     }
-    const fields = ['name', 'year', 'team', 'site', 'notes'];
+    const project = access.project;
+    const nextWorkspace =
+      req.body.workspaceId !== undefined
+        ? req.body.workspaceId || null
+        : req.body.workspace !== undefined
+          ? req.body.workspace || null
+          : undefined;
+    if (nextWorkspace) {
+      const wsAccess = await getWorkspaceMembership(req.userId, nextWorkspace);
+      if (!wsAccess.ok || !hasMinRole(wsAccess.role, 'editor')) {
+        return res.status(403).json({ success: false, message: 'Нямате права за този workspace.' });
+      }
+    }
+    const fields = ['name', 'year', 'team', 'site', 'notes', 'crs'];
     fields.forEach((f) => {
       if (req.body[f] !== undefined) project[f] = req.body[f];
     });
+    if (nextWorkspace !== undefined) project.workspace = nextWorkspace;
     await project.save();
     res.json({ success: true, data: project });
   } catch (error) {
@@ -90,11 +117,13 @@ router.patch('/projects/:id', async (req, res) => {
 
 router.delete('/projects/:id', async (req, res) => {
   try {
-    const project = await FieldBookProject.findOneAndDelete({ _id: req.params.id, user: req.userId });
-    if (!project) {
+    const access = await getProjectAccess(req.userId, req.params.id);
+    if (!access.ok || access.role !== 'owner') {
       return res.status(404).json({ success: false, message: 'Проектът не е намерен.' });
     }
-    await FieldBook.deleteMany({ project: project._id, user: req.userId });
+    const project = access.project;
+    await FieldBook.deleteMany({ project: project._id });
+    await project.deleteOne();
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -105,11 +134,11 @@ router.delete('/projects/:id', async (req, res) => {
 
 router.get('/projects/:projectId/books', async (req, res) => {
   try {
-    const project = await FieldBookProject.findOne({ _id: req.params.projectId, user: req.userId });
-    if (!project) {
+    const access = await getProjectAccess(req.userId, req.params.projectId);
+    if (!access.ok) {
       return res.status(404).json({ success: false, message: 'Проектът не е намерен.' });
     }
-    const books = await FieldBook.find({ project: project._id, user: req.userId }).sort({ updatedAt: -1 });
+    const books = await FieldBook.find({ project: access.project._id }).sort({ updatedAt: -1 });
     res.json({ success: true, data: books });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -118,10 +147,11 @@ router.get('/projects/:projectId/books', async (req, res) => {
 
 router.post('/projects/:projectId/books', async (req, res) => {
   try {
-    const project = await FieldBookProject.findOne({ _id: req.params.projectId, user: req.userId });
-    if (!project) {
+    const access = await getProjectAccess(req.userId, req.params.projectId);
+    if (!access.ok || !hasMinRole(access.role, 'editor')) {
       return res.status(404).json({ success: false, message: 'Проектът не е намерен.' });
     }
+    const project = access.project;
     const { name, date, crew, site, notes, settings, type } = req.body;
     if (!name || !String(name).trim()) {
       return res.status(400).json({ success: false, message: 'Името на карнета е задължително.' });
@@ -145,10 +175,20 @@ router.post('/projects/:projectId/books', async (req, res) => {
   }
 });
 
+async function loadBookWithAccess(userId, bookId, minRole = 'viewer') {
+  const book = await FieldBook.findById(bookId);
+  if (!book) return { ok: false, book: null };
+  const access = await getProjectAccess(userId, book.project);
+  if (!access.ok || !hasMinRole(access.role, minRole)) {
+    return { ok: false, book: null };
+  }
+  return { ok: true, book, access };
+}
+
 router.get('/books/:id', async (req, res) => {
   try {
-    const book = await FieldBook.findOne({ _id: req.params.id, user: req.userId });
-    if (!book) {
+    const { ok, book } = await loadBookWithAccess(req.userId, req.params.id, 'viewer');
+    if (!ok) {
       return res.status(404).json({ success: false, message: 'Карнетът не е намерен.' });
     }
     res.json({ success: true, data: book });
@@ -159,8 +199,8 @@ router.get('/books/:id', async (req, res) => {
 
 router.patch('/books/:id', async (req, res) => {
   try {
-    const book = await FieldBook.findOne({ _id: req.params.id, user: req.userId });
-    if (!book) {
+    const { ok, book } = await loadBookWithAccess(req.userId, req.params.id, 'editor');
+    if (!ok) {
       return res.status(404).json({ success: false, message: 'Карнетът не е намерен.' });
     }
     const { name, date, crew, site, notes, settings, rows, locked, archived } = req.body;
@@ -196,8 +236,8 @@ router.patch('/books/:id', async (req, res) => {
 
 router.post('/books/:id/calculate', async (req, res) => {
   try {
-    const book = await FieldBook.findOne({ _id: req.params.id, user: req.userId });
-    if (!book) {
+    const { ok, book } = await loadBookWithAccess(req.userId, req.params.id, 'editor');
+    if (!ok) {
       return res.status(404).json({ success: false, message: 'Карнетът не е намерен.' });
     }
     if (book.locked) {
@@ -234,10 +274,11 @@ router.post('/books/:id/calculate', async (req, res) => {
 
 router.delete('/books/:id', async (req, res) => {
   try {
-    const book = await FieldBook.findOneAndDelete({ _id: req.params.id, user: req.userId });
-    if (!book) {
+    const { ok, book } = await loadBookWithAccess(req.userId, req.params.id, 'editor');
+    if (!ok) {
       return res.status(404).json({ success: false, message: 'Карнетът не е намерен.' });
     }
+    await book.deleteOne();
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -246,8 +287,8 @@ router.delete('/books/:id', async (req, res) => {
 
 router.post('/books/:id/copy', async (req, res) => {
   try {
-    const book = await FieldBook.findOne({ _id: req.params.id, user: req.userId });
-    if (!book) {
+    const { ok, book } = await loadBookWithAccess(req.userId, req.params.id, 'editor');
+    if (!ok) {
       return res.status(404).json({ success: false, message: 'Карнетът не е намерен.' });
     }
     const copy = await FieldBook.create({

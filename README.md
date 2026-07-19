@@ -69,6 +69,16 @@ PUT    /api/calculations/:id       # Update calculation
 DELETE /api/calculations/:id       # Delete calculation
 ```
 
+### Survey workspace
+```
+GET/POST       /api/points                 # Survey points library
+POST           /api/points/import
+GET/POST/...   /api/workspaces             # Firm workspaces + invite / roles
+GET/POST/...   /api/fieldbooks             # Field book projects & carnets
+GET/POST/DEL   /api/gnss-field-log         # GNSS field log (cloud)
+GET            /api/v1/*                   # Public read API for integrations
+```
+
 ### Educational Features
 ```
 GET    /api/assignments            # Get assignments

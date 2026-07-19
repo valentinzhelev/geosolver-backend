@@ -174,4 +174,20 @@ router.get('/limits', async (req, res) => {
   }
 });
 
+// GET /api/calculations/:id - Single calculation with full payload
+router.get('/:id', auth, async (req, res) => {
+  try {
+    const calculation = await Calculation.findOne({
+      _id: req.params.id,
+      userId: req.user.id,
+    });
+    if (!calculation) {
+      return res.status(404).json({ error: 'Calculation not found' });
+    }
+    res.json(calculation);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router;

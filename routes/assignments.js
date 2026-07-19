@@ -342,6 +342,7 @@ router.post('/', auth, requireRole('teacher'), async (req, res) => {
         showCorrectAnswers: options?.showCorrectAnswers ?? false,
         showFeedback: options?.showFeedback ?? true,
         calculatorPolicy: options?.calculatorPolicy || 'guided',
+        linkedProjectId: options?.linkedProjectId || null,
       },
       settings: {
         customTolerance: options?.customTolerance,

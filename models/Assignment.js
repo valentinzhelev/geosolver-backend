@@ -79,6 +79,12 @@ const assignmentSchema = new mongoose.Schema({
       enum: ['off', 'guided', 'full'],
       default: 'guided',
     },
+    /** Optional survey project for PointPicker / map context in Edu tools. */
+    linkedProjectId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'FieldBookProject',
+      default: null,
+    },
   },
   // Generated variants data
   variants: [{

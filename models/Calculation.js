@@ -19,6 +19,9 @@ const calculationSchema = new mongoose.Schema({
       'hansen-task',
       'area-calculation',
       'distance-bearing',
+      'line-intersection',
+      'offset-point',
+      'segment-division',
       'scientific-calculator'
     ]
   },

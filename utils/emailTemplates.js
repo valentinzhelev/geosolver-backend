@@ -231,6 +231,55 @@ function adminNotificationEmail({ title, body }) {
   };
 }
 
+function workspaceInviteEmail({
+  recipientName,
+  workspaceName,
+  inviterName,
+  role,
+  inviteCode,
+  hasAccount,
+}) {
+  const safeName = escapeHtml(recipientName || '');
+  const safeWs = escapeHtml(workspaceName || 'Workspace');
+  const safeInviter = escapeHtml(inviterName || '');
+  const safeRole = escapeHtml(role || 'editor');
+  const safeCode = escapeHtml(inviteCode || '');
+  const frontend = getFrontendUrl();
+  const joinUrl = hasAccount
+    ? `${frontend}/workspace`
+    : `${frontend}/register?invite=${encodeURIComponent(inviteCode || '')}`;
+  const ctaLabel = hasAccount ? 'Отвори Workspace' : 'Регистрирай се и се присъедини';
+
+  return {
+    subject: `Покана за workspace „${workspaceName || 'GeoSolver'}“`,
+    html: layout({
+      title: 'Покана за workspace',
+      preheader: `${inviterName || 'Колега'} ви кани в ${workspaceName || 'GeoSolver workspace'}.`,
+      bodyHtml: `
+        <p style="margin:0 0 14px;">Здравей${safeName ? `, <strong>${safeName}</strong>` : ''},</p>
+        <p style="margin:0 0 14px;">
+          ${safeInviter ? `<strong>${safeInviter}</strong> ви кани` : 'Получихте покана'}
+          в workspace <strong>${safeWs}</strong> с роля <strong>${safeRole}</strong>.
+        </p>
+        ${
+          inviteCode
+            ? infoBox(
+                `<strong>Invite код:</strong> <span style="font-family:ui-monospace,monospace;letter-spacing:0.06em;">${safeCode}</span>`
+              )
+            : ''
+        }
+        ${
+          hasAccount
+            ? '<p style="margin:14px 0 0;">Вече сте добавени към workspace. Отворете GeoSolver, за да започнете работа.</p>'
+            : '<p style="margin:14px 0 0;">Нямате акаунт още — регистрирайте се и въведете invite кода в Workspace.</p>'
+        }
+        ${linkFallback(joinUrl)}`,
+      ctaUrl: joinUrl,
+      ctaLabel,
+    }),
+  };
+}
+
 module.exports = {
   layout,
   verificationEmail,
@@ -238,5 +287,6 @@ module.exports = {
   contactFormEmail,
   notificationEmail,
   adminNotificationEmail,
+  workspaceInviteEmail,
   escapeHtml,
 };
