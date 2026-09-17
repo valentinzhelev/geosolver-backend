@@ -17,7 +17,19 @@ const googleAuthRoutes = require('./routes/googleAuth');
 const assignmentRoutes = require('./routes/assignments');
 const studentRoutes = require('./routes/students');
 const classRoutes = require('./routes/classes');
-const submissionRoutes = require('./routes/submissions');
+// SECURITY: routes/submissions.js is intentionally NOT required/mounted.
+// It is legacy (pre-dates the Course/Assignment/TaskTemplate/Submission
+// classroom system), its handlers are incompatible with the current
+// Submission schema (it reads/writes studentId/assignmentId/teacherId/files,
+// which do not exist on models/Submission.js — see Milestone 0.5 audit), and
+// it contains an unauthenticated file-upload POST and an unauthenticated
+// file-serving GET. The current student submission flow is
+// routes/studentAssignments.js (POST /assignments/:id/submit), which does
+// not depend on this file in any way. The file itself, models/Submission.js,
+// any uploaded files, and any existing database documents are left
+// untouched — this only removes the HTTP route. Restore by re-adding the
+// require above and the `app.use('/api/submissions', submissionRoutes)`
+// line below.
 const plansRoutes = require('./routes/plans');
 const subscriptionsRoutes = require('./routes/subscriptions');
 const paymentsRoutes = require('./routes/payments');
@@ -116,7 +128,7 @@ app.use('/api/google-auth', googleAuthRoutes);
 app.use('/api/assignments', assignmentRoutes);
 app.use('/api/students', studentRoutes);
 app.use('/api/classes', classRoutes);
-app.use('/api/submissions', submissionRoutes);
+// app.use('/api/submissions', submissionRoutes); — intentionally not mounted, see comment near the require above.
 app.use('/api/plans', plansRoutes);
 app.use('/api/subscriptions', subscriptionsRoutes);
 app.use('/api/payments', paymentsRoutes);
