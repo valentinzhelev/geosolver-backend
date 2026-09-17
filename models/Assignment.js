@@ -171,8 +171,8 @@ assignmentSchema.methods.generateVariants = async function() {
   
   for (let i = 0; i < this.variantsCount; i++) {
     try {
-      const inputData = template.generateTestData(i, null);
-      const solution = template.generateSolution(inputData);
+      const inputData = await template.generateTestData(i, null);
+      const solution = await template.generateSolution(inputData);
       
       // Create solution hash for security
       const crypto = require('crypto');

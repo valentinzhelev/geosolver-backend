@@ -80,6 +80,16 @@ const taskTemplateSchema = new mongoose.Schema({
     type: String,
     trim: true
   }],
+  // SECURITY: server-only provenance marker. Set exclusively by
+  // utils/ensureMvpTemplates.js (never read from req.body anywhere —
+  // routes/taskTemplates.js must never add this to its create/update
+  // field lists). This — not `tags`, which is plain client-writable
+  // input and was never a trust boundary — is what utils/templateTrust.js
+  // relies on to identify a genuine system-seeded template.
+  isSystemTemplate: {
+    type: Boolean,
+    default: false
+  },
   // Usage statistics
   usageCount: {
     type: Number,
@@ -122,17 +132,25 @@ taskTemplateSchema.methods.validateSolution = function() {
 };
 
 // Method to generate test data
-taskTemplateSchema.methods.generateTestData = function(variantIndex = 0, seed = null) {
+// SECURITY (Milestone 0): scripts run through Node's `vm` module, which is
+// not a security boundary. Execution is restricted to trusted templates —
+// see utils/templateTrust.js. Do not remove this check without replacing
+// the underlying sandbox.
+taskTemplateSchema.methods.generateTestData = async function(variantIndex = 0, seed = null) {
+  const { isTaskTemplateTrusted } = require('../utils/templateTrust');
+  if (!(await isTaskTemplateTrusted(this))) {
+    throw new Error('Untrusted template: script execution is not permitted for this template.');
+  }
   try {
     const { SandboxExecutor } = require('../utils/sandbox');
     const executor = new SandboxExecutor();
-    
+
     const result = executor.executeGenerator(this.generatorScript, variantIndex, seed);
-    
+
     if (!result.success) {
       throw new Error(`Generator execution failed: ${result.error}`);
     }
-    
+
     return result.data;
   } catch (error) {
     throw new Error(`Generator execution failed: ${error.message}`);
@@ -140,17 +158,22 @@ taskTemplateSchema.methods.generateTestData = function(variantIndex = 0, seed = 
 };
 
 // Method to generate solution
-taskTemplateSchema.methods.generateSolution = function(inputData) {
+// SECURITY (Milestone 0): see generateTestData above — same trust gate.
+taskTemplateSchema.methods.generateSolution = async function(inputData) {
+  const { isTaskTemplateTrusted } = require('../utils/templateTrust');
+  if (!(await isTaskTemplateTrusted(this))) {
+    throw new Error('Untrusted template: script execution is not permitted for this template.');
+  }
   try {
     const { SandboxExecutor } = require('../utils/sandbox');
     const executor = new SandboxExecutor();
-    
+
     const result = executor.executeSolution(this.solutionScript, inputData);
-    
+
     if (!result.success) {
       throw new Error(`Solution generation failed: ${result.error}`);
     }
-    
+
     return result.data;
   } catch (error) {
     throw new Error(`Solution generation failed: ${error.message}`);

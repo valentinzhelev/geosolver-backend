@@ -104,7 +104,10 @@ router.get('/:id', auth, async (req, res) => {
 });
 
 // Create new task template
-router.post('/', auth, requireRole('teacher'), async (req, res) => {
+// SECURITY (Milestone 0): generatorScript/solutionScript run through an
+// untrusted-code path (utils/sandbox.js, Node `vm`). Restricted to admin
+// until a real sandbox replaces this. See utils/templateTrust.js.
+router.post('/', auth, requireRole('admin'), async (req, res) => {
   try {
     const {
       name,
@@ -204,7 +207,9 @@ router.post('/', auth, requireRole('teacher'), async (req, res) => {
 });
 
 // Update task template
-router.put('/:id', auth, requireRole('teacher'), async (req, res) => {
+// SECURITY (Milestone 0): see POST / above — script fields are only ever
+// modifiable by admin until the sandbox is replaced.
+router.put('/:id', auth, requireRole('admin'), async (req, res) => {
   try {
     const template = await TaskTemplate.findById(req.params.id);
 
@@ -354,7 +359,9 @@ router.delete('/:id', auth, requireRole('teacher'), async (req, res) => {
 });
 
 // Test task template (generate sample data)
-router.post('/:id/test', auth, requireRole('teacher'), async (req, res) => {
+// SECURITY (Milestone 0): this executes generatorScript/solutionScript —
+// see POST / above.
+router.post('/:id/test', auth, requireRole('admin'), async (req, res) => {
   try {
     const template = await TaskTemplate.findById(req.params.id);
 
@@ -376,8 +383,8 @@ router.post('/:id/test', auth, requireRole('teacher'), async (req, res) => {
     const { variantIndex = 0, seed = null } = req.body;
 
     try {
-      const inputData = template.generateTestData(variantIndex, seed);
-      const solution = template.generateSolution(inputData);
+      const inputData = await template.generateTestData(variantIndex, seed);
+      const solution = await template.generateSolution(inputData);
 
       res.json({
         success: true,
