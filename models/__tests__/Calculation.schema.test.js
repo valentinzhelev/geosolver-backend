@@ -46,3 +46,54 @@ describe('Calculation schema — Milestone 1 backward compatibility', () => {
     expect(doc.referencedPoints[0].role).toBe('stationA');
   });
 });
+
+describe('Calculation schema — canonical engine fields (Milestone 2)', () => {
+  const base = {
+    userId: '507f1f77bcf86cd799439011',
+    toolName: 'first-basic-task',
+    toolDisplayName: { bg: 'Първа задача', en: 'First task' },
+    inputData: { y1: 1, x1: 1, alpha: 1, s: 1 },
+    resultData: { y2: 2, x2: 2 },
+  };
+
+  it('a HISTORICAL row has NO resultAuthority and no clientContractVersion (no default, never backfilled)', () => {
+    const legacy = new Calculation(base);
+    expect(legacy.resultAuthority).toBeUndefined();
+    expect(legacy.clientContractVersion).toBeUndefined();
+    expect(legacy.validateSync()).toBeUndefined();
+    expect(legacy.toObject()).not.toHaveProperty('resultAuthority');
+  });
+
+  it('resultAuthority accepts exactly "server" and "client"', () => {
+    for (const value of ['server', 'client']) {
+      const doc = new Calculation({ ...base, resultAuthority: value });
+      expect(doc.validateSync()).toBeUndefined();
+      expect(doc.resultAuthority).toBe(value);
+    }
+    for (const bad of ['SERVER', 'trusted', '', 'legacy', true]) {
+      const doc = new Calculation({ ...base, resultAuthority: bad });
+      expect(doc.validateSync()).toBeDefined();
+    }
+  });
+
+  it('clientContractVersion is an optional diagnostic number', () => {
+    const doc = new Calculation({ ...base, resultAuthority: 'server', clientContractVersion: 2 });
+    expect(doc.validateSync()).toBeUndefined();
+    expect(doc.clientContractVersion).toBe(2);
+  });
+
+  it('a canonical row carries the engineVersion that computed it', () => {
+    const doc = new Calculation({ ...base, toolName: 'offset-point', engineVersion: 2, resultAuthority: 'server' });
+    expect(doc.validateSync()).toBeUndefined();
+    expect(doc.engineVersion).toBe(2);
+  });
+
+  it('a Scientific Calculator row is client-authored with no engineVersion', () => {
+    const doc = new Calculation({
+      ...base, toolName: 'scientific-calculator', inputData: { expression: '1+1' }, resultData: { value: 2 }, resultAuthority: 'client',
+    });
+    expect(doc.validateSync()).toBeUndefined();
+    expect(doc.engineVersion).toBeUndefined();
+    expect(doc.resultAuthority).toBe('client');
+  });
+});

@@ -26,6 +26,7 @@ const app = require('../../app');
 const Calculation = require('../../models/Calculation');
 const SurveyPoint = require('../../models/SurveyPoint');
 const Workspace = require('../../models/Workspace');
+const { VALID_INPUTS, CURRENT_CLIENT_CONTRACT } = require('../../tests/support/canonicalInputs');
 const FieldBookProject = require('../../models/FieldBookProject');
 
 function tokenFor(userId, role = 'student') {
@@ -52,7 +53,7 @@ const validBody = {
   toolName: 'first-basic-task',
   toolDisplayName: { bg: 'Първа задача', en: 'First task' },
   inputData: { y1: 100, x1: 100, alpha: 50, s: 80 },
-  resultData: { y2: 150, x2: 150 },
+  resultData: { y2: 156.569, x2: 156.569, deltaX: 56.569, deltaY: 56.569 },
   calculationTime: 12,
 };
 
@@ -469,7 +470,7 @@ describe('Scientific Calculator is not a Project calculation', () => {
   });
 
   // offset-point (2.0B: positive d = LEFT) and resection (2.0C: directed clockwise angles) are engine v2;
-  // every other professional tool remains v1.
+  // every other professional tool remains v1. The stamp comes from the engine that computed the row.
   it.each([
     ['first-basic-task', 1], ['second-basic-task', 1], ['forward-intersection', 1], ['resection', 2],
     ['polar-intersection', 1], ['coordinate-transformation', 1], ['hansen-task', 1], ['area-calculation', 1],
@@ -478,10 +479,12 @@ describe('Scientific Calculator is not a Project calculation', () => {
     const res = await request(app)
       .post('/api/calculations')
       .set('Authorization', `Bearer ${tokenFor(OUTSIDER_ID)}`)
-      .send({ ...validBody, toolName });
+      .send({ toolName, inputData: VALID_INPUTS[toolName], clientContractVersion: CURRENT_CLIENT_CONTRACT });
 
     expect(res.status).toBe(201);
-    expect(Calculation.mock.calls[0][0].engineVersion).toBe(expectedVersion);
+    const saved = Calculation.mock.calls[0][0];
+    expect(saved.engineVersion).toBe(expectedVersion);
+    expect(saved.resultAuthority).toBe('server');
   });
 });
 

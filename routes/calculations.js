@@ -6,7 +6,7 @@ const auth = require('../middleware/auth');
 const { getLimitsForUser } = require('../utils/calculationLimits');
 const { validateEduCalculationAccess } = require('../utils/eduCalculationAccess');
 const { getProjectAccess, getPointAccess, hasMinRole } = require('../utils/workspaceAccess');
-const { getEngineVersion, isProjectCapableTool } = require('../utils/engineVersions');
+const engines = require('../engines');
 const { resolveClaimedCoordinates } = require('../utils/toolPointRoles');
 const { extractPointResult } = require('../utils/calculationPointOutputs');
 const SurveyPoint = require('../models/SurveyPoint');
@@ -108,26 +108,79 @@ async function resolvePointReferences(userId, projectId, toolName, inputData, po
   return resolved;
 }
 
-// POST /api/calculations - Save calculation (authenticated, counts toward shared limit)
+const SCIENTIFIC_TOOL = 'scientific-calculator';
+
+// Cosmetic label only; taken from the client when it is a well-formed {bg, en} pair, otherwise
+// from the engine so a missing label can never turn into a schema (500) failure.
+function safeDisplayName(clientValue, engine) {
+  const ok = (s) => typeof s === 'string' && s.trim() && s.length <= 100;
+  if (clientValue && ok(clientValue.bg) && ok(clientValue.en)) {
+    return { bg: clientValue.bg.trim(), en: clientValue.en.trim() };
+  }
+  return engine ? engine.displayName : { bg: 'Научен калкулатор', en: 'Scientific calculator' };
+}
+
+/**
+ * POST /api/calculations — CANONICAL professional path (Milestone 2).
+ *
+ *   auth
+ *   -> resolve the CURRENT engine for toolName
+ *   -> stale-client gate (offset-point / resection need clientContractVersion >= 2)
+ *   -> normalize + validate the input           (structured 400, never a 500)
+ *   -> project authorization
+ *   -> SurveyPoint provenance ON THE NORMALIZED INPUT
+ *   -> edu access / free-plan limit             (unchanged behavior)
+ *   -> compute resultData with the canonical engine, format it (shipped rounding contract)
+ *   -> persist { normalized inputData, server resultData, engineVersion of the computing engine,
+ *                resultAuthority: 'server' }
+ *
+ * A client-supplied resultData is only ever an ADVISORY preview: it is compared per field with the
+ * server result for diagnostics (`clientCheck`) and NEVER persisted for a professional tool.
+ * engineVersion, resultAuthority, crs and referencedPoints are always server-derived; body values
+ * for them are ignored. The Scientific Calculator has no engine: it keeps client authority.
+ */
 router.post('/', async (req, res) => {
   try {
     const {
-      toolName, toolDisplayName, inputData, resultData, calculationTime, eduContext,
-      projectId, pointReferences,
-    } = req.body;
+      toolName, toolDisplayName, inputData, resultData: clientResultData, calculationTime, eduContext,
+      projectId, pointReferences, clientContractVersion,
+    } = req.body || {};
 
     const userId = getUserIdFromRequest(req);
     if (!userId) {
       return res.status(401).json({ error: 'Authentication required' });
     }
 
-    // Project scoping is validated FIRST and rejects the whole request on
-    // failure — a bad/inaccessible projectId must never silently fall back
-    // to a standalone save.
+    const engine = engines.getCurrentEngine(toolName);
+    if (!engine && toolName !== SCIENTIFIC_TOOL) {
+      return res.status(400).json({ error: 'Unsupported tool', code: 'UNSUPPORTED_TOOL', field: 'toolName' });
+    }
+
+    let normalizedInput = inputData;
+    if (engine) {
+      // Zero silent divergence: a stale client would display one result while the backend stores another.
+      const contract = engines.checkClientContract(toolName, clientContractVersion);
+      if (!contract.ok) {
+        return res.status(409).json({
+          error: contract.error,
+          code: contract.code,
+          requiredClientContractVersion: contract.required,
+        });
+      }
+      try {
+        normalizedInput = engine.normalizeAndValidate(inputData);
+      } catch (engineErr) {
+        if (engines.isEngineError(engineErr)) return res.status(engineErr.status).json(engineErr.toResponseBody());
+        throw engineErr;
+      }
+    }
+
+    // Project scoping is validated before anything is stored and rejects the whole request on
+    // failure — a bad/inaccessible projectId must never silently fall back to a standalone save.
     let crs = null;
     if (projectId) {
       // Scientific Calculator is a general utility, not a Project calculation.
-      if (!isProjectCapableTool(toolName)) {
+      if (!engine) {
         return res.status(400).json({ error: 'This tool cannot be saved to a project' });
       }
       const access = await getProjectAccess(userId, projectId);
@@ -137,9 +190,10 @@ router.post('/', async (req, res) => {
       crs = access.project.crs || null;
     }
 
+    // Provenance runs on the SAME normalized values the engine consumes and that get persisted.
     let referencedPoints;
     try {
-      referencedPoints = await resolvePointReferences(userId, projectId, toolName, inputData, pointReferences);
+      referencedPoints = await resolvePointReferences(userId, projectId, toolName, normalizedInput, pointReferences);
     } catch (refErr) {
       return res.status(refErr.status || 400).json({ error: refErr.message || 'Invalid point reference' });
     }
@@ -166,27 +220,60 @@ router.post('/', async (req, res) => {
       }
     }
 
+    let persistedResult = clientResultData; // Scientific Calculator only
+    let engineVersion = null;
+    let resultAuthority = 'client';
+    let clientCheck;
+    if (engine) {
+      try {
+        const full = engine.compute(normalizedInput);
+        persistedResult = engine.format(full);
+      } catch (engineErr) {
+        if (engines.isEngineError(engineErr)) return res.status(engineErr.status).json(engineErr.toResponseBody());
+        throw engineErr;
+      }
+      engineVersion = engine.version;
+      resultAuthority = 'server';
+      const comparison = engines.compareResultData(engine, persistedResult, clientResultData);
+      clientCheck = { status: comparison.status, fields: comparison.fields.map((f) => ({ field: f.field, difference: f.difference })), engineVersion };
+      if (comparison.status === 'mismatch') {
+        engines.logClientMismatch({
+          toolName,
+          engineVersion,
+          clientContractVersion: engines.parseClientContractVersion(clientContractVersion),
+          fields: comparison.fields,
+        });
+      }
+    }
+
+    const declaredContract = engines.parseClientContractVersion(clientContractVersion);
     const calculation = new Calculation({
       userId: userId,
       toolName,
-      toolDisplayName,
-      inputData,
-      resultData,
-      calculationTime,
+      toolDisplayName: safeDisplayName(toolDisplayName, engine),
+      inputData: normalizedInput,
+      resultData: persistedResult,
+      calculationTime: Number.isFinite(calculationTime) && calculationTime >= 0 ? calculationTime : undefined,
       ipAddress: req.ip,
       userAgent: req.get('User-Agent'),
       context,
       assignmentId,
       projectId: projectId || null,
-      engineVersion: getEngineVersion(toolName),
+      engineVersion,
+      resultAuthority,
+      ...(declaredContract !== null ? { clientContractVersion: declaredContract } : {}),
       referencedPoints,
       crs,
     });
 
     await calculation.save();
 
-    res.status(201).json(calculation);
+    const body = typeof calculation.toJSON === 'function' ? calculation.toJSON() : { ...calculation };
+    res.status(201).json(clientCheck ? { ...body, clientCheck } : body);
   } catch (error) {
+    if (error && error.name === 'ValidationError') {
+      return res.status(400).json({ error: 'Invalid calculation data', code: 'INVALID_CALCULATION' });
+    }
     res.status(500).json({ error: error.message });
   }
 });
@@ -325,10 +412,12 @@ router.get('/:id', auth, async (req, res) => {
 /**
  * POST /api/calculations/:id/create-point  (Milestone 1.1 — explicit "Save as point")
  *
- * Creates ONE SurveyPoint from a Project calculation's STORED resultData.
- * The client supplies only user-entered identity fields (name, code); the
- * coordinates, project and provenance are all derived here. Nothing is
- * recomputed and the Calculation document is never modified.
+ * Creates ONE SurveyPoint from a Project calculation. Canonical rows
+ * (resultAuthority 'server') use their stored server-authoritative result;
+ * legacy rows are verified per (toolName, engineVersion) first and may be
+ * blocked. The client supplies only user-entered identity fields (name,
+ * code); the coordinates, project and provenance are all derived here and
+ * the Calculation document is never modified.
  *
  * Product rules: never automatic; project calculations only; caller needs
  * editor role on that project (not necessarily the calculation's creator);
@@ -406,14 +495,27 @@ router.post('/:id/create-point', auth, async (req, res) => {
       });
     }
 
+    // Canonical rows (resultAuthority 'server') use their stored server-authoritative result
+    // directly. Anything else is a LEGACY row whose stored result was client-computed: it is
+    // verified per (toolName, engineVersion) — see engines/legacyVerification.js — and blocked
+    // when it cannot be verified. The Calculation is never rewritten and there is no override.
+    let pointXY = { x: output.x, y: output.y };
+    if (calculation.resultAuthority !== 'server') {
+      const legacy = engines.verifyLegacyCalculation(calculation);
+      if (!legacy.allowed) {
+        return res.status(legacy.status).json({ error: legacy.error, code: legacy.code });
+      }
+      pointXY = { x: legacy.x, y: legacy.y };
+    }
+
     try {
       const point = await SurveyPoint.create({
         user: req.user.id,
         projectId: calculation.projectId,
         name: pointName,
         code: pointCode,
-        x: output.x,
-        y: output.y,
+        x: pointXY.x,
+        y: pointXY.y,
         h: null,
         sourceCalculationId: calculation._id,
       });

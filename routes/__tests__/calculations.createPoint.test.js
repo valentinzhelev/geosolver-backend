@@ -45,6 +45,7 @@ function makeCalc(overrides = {}) {
     userId: OWNER, // Alice, the creator
     toolName: 'first-basic-task',
     projectId: PROJECT_ID,
+    resultAuthority: 'server', // canonical row: the stored authoritative result is used directly
     crs: 'EPSG:7801',
     inputData: { y1: 1, x1: 1, alpha: 50, s: 10 },
     resultData: { y2: 1500.25, x2: 2500.75, deltaX: 3, deltaY: 4 },

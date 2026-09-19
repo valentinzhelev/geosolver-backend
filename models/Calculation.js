@@ -59,6 +59,23 @@ const calculationSchema = new mongoose.Schema({
   engineVersion: {
     type: Number,
   },
+  // Who produced resultData. NO DEFAULT, and never settable from a request body (the route sets
+  // it explicitly), so the three states stay distinguishable:
+  //   'server' -> computed by the canonical backend engine (engines/), i.e. `engineVersion` names
+  //               the engine that actually computed this row;
+  //   'client' -> a NEW row that intentionally stays client-authored (Scientific Calculator only,
+  //               which has no engine and no engineVersion);
+  //   absent   -> a HISTORICAL row from before the canonical engine: resultData was client-computed
+  //               and `engineVersion` (if any) was only a label. Never backfilled.
+  resultAuthority: {
+    type: String,
+    enum: ['server', 'client'],
+  },
+  // Diagnostic only: the frontend calculation contract the client declared (see
+  // engines/clientContract.js). It never defines mathematical authority.
+  clientContractVersion: {
+    type: Number,
+  },
   // Immutable snapshots of any SurveyPoints that fed this calculation's
   // input, built server-side from database values only — see
   // routes/calculations.js's point-reference resolution. Never trust
