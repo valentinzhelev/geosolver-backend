@@ -50,3 +50,19 @@ describe('resolveClaimedCoordinates — dynamic-role tools (area-calculation)', 
     expect(resolveClaimedCoordinates('area-calculation', 'vertex:0', {})).toEqual({ ok: false, reason: 'input_missing' });
   });
 });
+
+describe('forward-intersection provenance (Milestone 2.0 preflight)', () => {
+  // The exact numeric shape the frontend now persists
+  // (GEOSOLVER.BG/src/utils/forwardIntersectionInput.js).
+  const numeric = { yA: 200.5, xA: 100.25, yB: 310, xB: 420.125, beta1: 50, beta2: 60 };
+
+  it('resolves pointA and pointB from the numeric inputData shape', () => {
+    expect(resolveClaimedCoordinates('forward-intersection', 'pointA', numeric)).toEqual({ ok: true, x: 100.25, y: 200.5 });
+    expect(resolveClaimedCoordinates('forward-intersection', 'pointB', numeric)).toEqual({ ok: true, x: 420.125, y: 310 });
+  });
+
+  it('still rejects string coordinates — the validator is intentionally NOT loosened', () => {
+    const asStrings = { ...numeric, yA: '200.5', xA: '100.25' };
+    expect(resolveClaimedCoordinates('forward-intersection', 'pointA', asStrings)).toEqual({ ok: false, reason: 'input_missing' });
+  });
+});
