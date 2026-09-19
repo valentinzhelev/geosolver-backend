@@ -5,6 +5,16 @@ const User = require('../models/User');
 const auth = require('../middleware/auth');
 const { getLimitsForUser } = require('../utils/calculationLimits');
 const { validateEduCalculationAccess } = require('../utils/eduCalculationAccess');
+const { getProjectAccess, getPointAccess, hasMinRole } = require('../utils/workspaceAccess');
+const { getEngineVersion, isProjectCapableTool } = require('../utils/engineVersions');
+const { resolveClaimedCoordinates } = require('../utils/toolPointRoles');
+
+// Numeric tolerance for comparing submitted inputData coordinates against a
+// SurveyPoint's stored coordinates. JS's Number<->String round-trip is exact
+// (parseFloat(String(n)) === n for every finite n), so an untouched
+// point-derived field matches exactly; this tolerance only absorbs
+// legitimate floating-point noise, not meaningful edits.
+const COORDINATE_TOLERANCE = 1e-6;
 
 function getUserIdFromRequest(req) {
   const token = req.header('Authorization')?.replace('Bearer ', '');
@@ -18,14 +28,118 @@ function getUserIdFromRequest(req) {
   }
 }
 
+/**
+ * Milestone 1 trust boundary: the frontend sends only
+ * [{ pointId, role }, ...]. This resolves each into a full, immutable
+ * snapshot built from database values — never from client-supplied
+ * name/code/x/y/h.
+ *
+ * Knowing a pointId is real and accessible is NOT sufficient: a caller
+ * could submit inputData for point B while attaching a pointReferences
+ * entry claiming point A. So for every reference this also:
+ *   1. validates the role is one this toolName actually supports
+ *      (utils/toolPointRoles.js, verified against the real frontend payloads)
+ *   2. rejects duplicate roles (a tool only has one "pointA" slot)
+ *   3. loads and access-checks the real SurveyPoint
+ *   4. for project calculations, verifies the point belongs to the SAME project
+ *   5. extracts whatever x/y the submitted inputData actually claims for that
+ *      role, and numerically compares it against the point's real coordinates
+ *      — string-formatting equality is never used
+ * Any failure throws { status, message } so the caller rejects the WHOLE
+ * request rather than silently dropping or weakening a bad entry.
+ */
+async function resolvePointReferences(userId, projectId, toolName, inputData, pointReferences) {
+  if (!Array.isArray(pointReferences) || pointReferences.length === 0) return [];
+
+  const seenRoles = new Set();
+  const resolved = [];
+  for (const ref of pointReferences) {
+    const pointId = ref && ref.pointId;
+    const role = ref && typeof ref.role === 'string' ? ref.role.trim() : '';
+    if (!pointId || !role) {
+      throw { status: 400, message: 'Invalid point reference: pointId and role are required' };
+    }
+    if (seenRoles.has(role)) {
+      throw { status: 400, message: `Duplicate point reference role: ${role}` };
+    }
+    seenRoles.add(role);
+
+    const claim = resolveClaimedCoordinates(toolName, role, inputData);
+    if (!claim.ok) {
+      throw {
+        status: 400,
+        message: claim.reason === 'unknown_role'
+          ? `Role "${role}" is not valid for tool "${toolName}"`
+          : `inputData is missing numeric coordinates for role "${role}"`,
+      };
+    }
+
+    const access = await getPointAccess(userId, pointId);
+    if (!access.ok) {
+      throw { status: 403, message: `No access to referenced point ${pointId}` };
+    }
+
+    const point = access.point;
+    if (projectId && String(point.projectId || '') !== String(projectId)) {
+      throw { status: 400, message: `Referenced point ${pointId} does not belong to this project` };
+    }
+
+    const dx = Math.abs(claim.x - point.x);
+    const dy = Math.abs(claim.y - point.y);
+    if (dx > COORDINATE_TOLERANCE || dy > COORDINATE_TOLERANCE) {
+      throw {
+        status: 400,
+        message: `Submitted input for role "${role}" does not match SurveyPoint ${pointId}`,
+      };
+    }
+
+    resolved.push({
+      pointId: point._id,
+      role: role.slice(0, 50),
+      name: point.name,
+      code: point.code,
+      x: point.x,
+      y: point.y,
+      h: point.h,
+    });
+  }
+  return resolved;
+}
+
 // POST /api/calculations - Save calculation (authenticated, counts toward shared limit)
 router.post('/', async (req, res) => {
   try {
-    const { toolName, toolDisplayName, inputData, resultData, calculationTime, eduContext } = req.body;
+    const {
+      toolName, toolDisplayName, inputData, resultData, calculationTime, eduContext,
+      projectId, pointReferences,
+    } = req.body;
 
     const userId = getUserIdFromRequest(req);
     if (!userId) {
       return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    // Project scoping is validated FIRST and rejects the whole request on
+    // failure — a bad/inaccessible projectId must never silently fall back
+    // to a standalone save.
+    let crs = null;
+    if (projectId) {
+      // Scientific Calculator is a general utility, not a Project calculation.
+      if (!isProjectCapableTool(toolName)) {
+        return res.status(400).json({ error: 'This tool cannot be saved to a project' });
+      }
+      const access = await getProjectAccess(userId, projectId);
+      if (!access.ok || !hasMinRole(access.role, 'editor')) {
+        return res.status(403).json({ error: 'Editor access to this project is required' });
+      }
+      crs = access.project.crs || null;
+    }
+
+    let referencedPoints;
+    try {
+      referencedPoints = await resolvePointReferences(userId, projectId, toolName, inputData, pointReferences);
+    } catch (refErr) {
+      return res.status(refErr.status || 400).json({ error: refErr.message || 'Invalid point reference' });
     }
 
     let context = 'consumer';
@@ -61,10 +175,14 @@ router.post('/', async (req, res) => {
       userAgent: req.get('User-Agent'),
       context,
       assignmentId,
+      projectId: projectId || null,
+      engineVersion: getEngineVersion(toolName),
+      referencedPoints,
+      crs,
     });
-    
+
     await calculation.save();
-    
+
     res.status(201).json(calculation);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -175,16 +293,28 @@ router.get('/limits', async (req, res) => {
 });
 
 // GET /api/calculations/:id - Single calculation with full payload
+// Standalone calculations: creator only, exactly as before. Project-scoped
+// calculations: creator, OR any user with read access to that project.
 router.get('/:id', auth, async (req, res) => {
   try {
-    const calculation = await Calculation.findOne({
-      _id: req.params.id,
-      userId: req.user.id,
-    });
+    const calculation = await Calculation.findById(req.params.id);
     if (!calculation) {
       return res.status(404).json({ error: 'Calculation not found' });
     }
-    res.json(calculation);
+
+    const isCreator = String(calculation.userId) === String(req.user.id);
+    if (isCreator) {
+      return res.json(calculation);
+    }
+
+    if (calculation.projectId) {
+      const access = await getProjectAccess(req.user.id, calculation.projectId);
+      if (access.ok) {
+        return res.json(calculation);
+      }
+    }
+
+    return res.status(404).json({ error: 'Calculation not found' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

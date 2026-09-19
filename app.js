@@ -54,6 +54,7 @@ const workspacesRoutes = require('./routes/workspaces');
 const gnssFieldLogRoutes = require('./routes/gnssFieldLog');
 const teacherTemplatesRoutes = require('./routes/teacherTemplates');
 const scanRoutes = require('./routes/scan');
+const projectCalculationsRoutes = require('./routes/projectCalculations');
 const localeMiddleware = require('./middleware/locale');
 
 const app = express();
@@ -152,6 +153,7 @@ app.use('/api/workspaces', workspacesRoutes);
 app.use('/api/gnss-field-log', gnssFieldLogRoutes);
 app.use('/api/teacher/templates', teacherTemplatesRoutes);
 app.use('/api/scan', scanRoutes);
+app.use('/api/projects', projectCalculationsRoutes);
 app.use('/api/billing', billingRoutes);
 
 // Health check endpoint.

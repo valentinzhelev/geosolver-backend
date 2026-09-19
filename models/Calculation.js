@@ -44,6 +44,47 @@ const calculationSchema = new mongoose.Schema({
     ref: 'Assignment',
     default: null,
   },
+  // Milestone 1 — Project Calculations V1
+  projectId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'FieldBookProject',
+    default: null,
+  },
+  // Provenance/version label for the geodetic engine that produced this
+  // result. Intentionally has NO schema default: historical documents that
+  // predate this field must remain unversioned (absent), not silently
+  // backfilled to 1. Every NEW save is stamped explicitly by the backend
+  // from utils/engineVersions.js. This is a label, not proof the backend
+  // recomputed/verified the result — see utils/engineVersions.js.
+  engineVersion: {
+    type: Number,
+  },
+  // Immutable snapshots of any SurveyPoints that fed this calculation's
+  // input, built server-side from database values only — see
+  // routes/calculations.js's point-reference resolution. Never trust
+  // client-supplied name/code/x/y/h here.
+  referencedPoints: {
+    type: [
+      {
+        pointId: { type: mongoose.Schema.Types.ObjectId, ref: 'SurveyPoint', required: true },
+        role: { type: String, required: true, trim: true },
+        name: String,
+        code: String,
+        x: Number,
+        y: Number,
+        h: Number,
+        _id: false,
+      },
+    ],
+    default: [],
+  },
+  // Snapshot of the project's CRS at save time (never live-updated if the
+  // project's CRS later changes). Null for standalone calculations, since
+  // none of the base calculators have any CRS concept today.
+  crs: {
+    type: String,
+    default: null,
+  },
 }, { timestamps: true });
 
 calculationSchema.index({ userId: 1, context: 1 });
@@ -51,5 +92,6 @@ calculationSchema.index({ userId: 1, context: 1 });
 // Index for efficient queries
 calculationSchema.index({ userId: 1, createdAt: -1 });
 calculationSchema.index({ toolName: 1, createdAt: -1 });
+calculationSchema.index({ projectId: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Calculation', calculationSchema);

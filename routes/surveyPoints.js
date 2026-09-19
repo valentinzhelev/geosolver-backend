@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const auth = require('../middleware/auth');
 const SurveyPoint = require('../models/SurveyPoint');
-const { getSharedProjectIds, getProjectAccess, hasMinRole } = require('../utils/workspaceAccess');
+const { getSharedProjectIds, getProjectAccess, getPointAccess, hasMinRole } = require('../utils/workspaceAccess');
 
 router.use(auth);
 
@@ -10,19 +10,6 @@ function parseCoord(v) {
   if (v === null || v === undefined || v === '') return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
-}
-
-async function getPointAccess(userId, pointId) {
-  const point = await SurveyPoint.findById(pointId);
-  if (!point) return { ok: false, point: null };
-  if (String(point.user) === String(userId)) {
-    return { ok: true, role: 'owner', point };
-  }
-  if (point.projectId) {
-    const access = await getProjectAccess(userId, point.projectId);
-    if (access.ok) return { ok: true, role: access.role, point };
-  }
-  return { ok: false, point };
 }
 
 router.get('/', async (req, res) => {

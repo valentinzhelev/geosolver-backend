@@ -1,5 +1,6 @@
 const Workspace = require('../models/Workspace');
 const FieldBookProject = require('../models/FieldBookProject');
+const SurveyPoint = require('../models/SurveyPoint');
 
 const ROLE_RANK = { viewer: 0, editor: 1, admin: 2, owner: 3 };
 
@@ -55,10 +56,31 @@ function hasMinRole(role, minRole) {
   return (ROLE_RANK[role] ?? -1) >= (ROLE_RANK[minRole] ?? 99);
 }
 
+/**
+ * Access check for a single SurveyPoint: either the caller owns it directly,
+ * or it belongs to a project the caller has (at least) some role in.
+ * Moved here from routes/surveyPoints.js so routes/calculations.js can reuse
+ * the exact same rule when resolving point references (Milestone 1 §4) —
+ * do not reimplement this check elsewhere.
+ */
+async function getPointAccess(userId, pointId) {
+  const point = await SurveyPoint.findById(pointId);
+  if (!point) return { ok: false, point: null };
+  if (String(point.user) === String(userId)) {
+    return { ok: true, role: 'owner', point };
+  }
+  if (point.projectId) {
+    const access = await getProjectAccess(userId, point.projectId);
+    if (access.ok) return { ok: true, role: access.role, point };
+  }
+  return { ok: false, point };
+}
+
 module.exports = {
   getMemberWorkspaceIds,
   getSharedProjectIds,
   getProjectAccess,
   getWorkspaceMembership,
+  getPointAccess,
   hasMinRole,
 };
