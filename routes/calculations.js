@@ -8,6 +8,8 @@ const { validateEduCalculationAccess } = require('../utils/eduCalculationAccess'
 const { getProjectAccess, getPointAccess, hasMinRole } = require('../utils/workspaceAccess');
 const { getEngineVersion, isProjectCapableTool } = require('../utils/engineVersions');
 const { resolveClaimedCoordinates } = require('../utils/toolPointRoles');
+const { extractPointResult } = require('../utils/calculationPointOutputs');
+const SurveyPoint = require('../models/SurveyPoint');
 
 // Numeric tolerance for comparing submitted inputData coordinates against a
 // SurveyPoint's stored coordinates. JS's Number<->String round-trip is exact
@@ -315,6 +317,119 @@ router.get('/:id', auth, async (req, res) => {
     }
 
     return res.status(404).json({ error: 'Calculation not found' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/calculations/:id/create-point  (Milestone 1.1 — explicit "Save as point")
+ *
+ * Creates ONE SurveyPoint from a Project calculation's STORED resultData.
+ * The client supplies only user-entered identity fields (name, code); the
+ * coordinates, project and provenance are all derived here. Nothing is
+ * recomputed and the Calculation document is never modified.
+ *
+ * Product rules: never automatic; project calculations only; caller needs
+ * editor role on that project (not necessarily the calculation's creator);
+ * only tools in utils/calculationPointOutputs.js; at most one live generated
+ * point per calculation (partial unique index on SurveyPoint); refused when
+ * the calculation's CRS snapshot no longer matches the project's CRS.
+ */
+router.post('/:id/create-point', auth, async (req, res) => {
+  try {
+    // Only these two body fields are ever read. x/y/projectId/
+    // sourceCalculationId/engineVersion etc. in the body are ignored.
+    const { name, code } = req.body || {};
+
+    const calculation = await Calculation.findById(req.params.id);
+    if (!calculation) {
+      return res.status(404).json({ error: 'Calculation not found' });
+    }
+
+    if (!calculation.projectId) {
+      // Standalone calculations are out of scope. Don't reveal other users'
+      // standalone calculations to callers who couldn't read them anyway.
+      if (String(calculation.userId) !== String(req.user.id)) {
+        return res.status(404).json({ error: 'Calculation not found' });
+      }
+      return res.status(400).json({
+        error: 'Only project calculations can be saved as a point',
+        code: 'NOT_A_PROJECT_CALCULATION',
+      });
+    }
+
+    const access = await getProjectAccess(req.user.id, calculation.projectId);
+    if (!access.ok) {
+      return res.status(404).json({ error: 'Calculation not found' });
+    }
+    if (!hasMinRole(access.role, 'editor')) {
+      return res.status(403).json({ error: 'Editor access to this project is required' });
+    }
+
+    const output = extractPointResult(calculation.toolName, calculation.resultData);
+    if (!output.ok) {
+      return res.status(400).json({
+        error: output.reason === 'unsupported_tool'
+          ? 'This calculation does not produce a single point'
+          : 'The stored result has no valid coordinates',
+        code: output.reason === 'unsupported_tool' ? 'UNSUPPORTED_TOOL' : 'RESULT_MISSING',
+      });
+    }
+
+    const pointName = typeof name === 'string' ? name.trim() : '';
+    if (!pointName) {
+      return res.status(400).json({ error: 'Point name is required', code: 'NAME_REQUIRED' });
+    }
+    const pointCode = typeof code === 'string' ? code.trim() : '';
+
+    // The result was computed in the grid the project declared at that time.
+    // If the project's CRS was edited since, saving old-grid coordinates into
+    // it would be silently wrong — refuse and let the user decide.
+    const calcCrs = calculation.crs || null;
+    const projectCrs = access.project.crs || null;
+    if (calcCrs !== projectCrs) {
+      return res.status(409).json({
+        error: 'The project CRS changed after this calculation was made',
+        code: 'CRS_MISMATCH',
+        calculationCrs: calcCrs,
+        projectCrs,
+      });
+    }
+
+    const existing = await SurveyPoint.findOne({ sourceCalculationId: calculation._id });
+    if (existing) {
+      return res.status(409).json({
+        error: 'A point was already created from this calculation',
+        code: 'ALREADY_CREATED',
+        data: existing,
+      });
+    }
+
+    try {
+      const point = await SurveyPoint.create({
+        user: req.user.id,
+        projectId: calculation.projectId,
+        name: pointName,
+        code: pointCode,
+        x: output.x,
+        y: output.y,
+        h: null,
+        sourceCalculationId: calculation._id,
+      });
+      return res.status(201).json({ success: true, data: point });
+    } catch (createErr) {
+      // Lost a race against a concurrent request: the unique index held.
+      if (createErr && createErr.code === 11000) {
+        const winner = await SurveyPoint.findOne({ sourceCalculationId: calculation._id });
+        return res.status(409).json({
+          error: 'A point was already created from this calculation',
+          code: 'ALREADY_CREATED',
+          data: winner,
+        });
+      }
+      throw createErr;
+    }
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
