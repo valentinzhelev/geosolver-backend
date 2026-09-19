@@ -468,18 +468,20 @@ describe('Scientific Calculator is not a Project calculation', () => {
     expect(saved.engineVersion).toBeNull();
   });
 
+  // offset-point (2.0B: positive d = LEFT) and resection (2.0C: directed clockwise angles) are engine v2;
+  // every other professional tool remains v1.
   it.each([
-    'first-basic-task', 'second-basic-task', 'forward-intersection', 'resection',
-    'polar-intersection', 'coordinate-transformation', 'hansen-task', 'area-calculation',
-    'distance-bearing', 'line-intersection', 'offset-point', 'segment-division',
-  ])('%s is stamped with server-side engineVersion 1', async (toolName) => {
+    ['first-basic-task', 1], ['second-basic-task', 1], ['forward-intersection', 1], ['resection', 2],
+    ['polar-intersection', 1], ['coordinate-transformation', 1], ['hansen-task', 1], ['area-calculation', 1],
+    ['distance-bearing', 1], ['line-intersection', 1], ['offset-point', 2], ['segment-division', 1],
+  ])('%s is stamped with server-side engineVersion %i', async (toolName, expectedVersion) => {
     const res = await request(app)
       .post('/api/calculations')
       .set('Authorization', `Bearer ${tokenFor(OUTSIDER_ID)}`)
       .send({ ...validBody, toolName });
 
     expect(res.status).toBe(201);
-    expect(Calculation.mock.calls[0][0].engineVersion).toBe(1);
+    expect(Calculation.mock.calls[0][0].engineVersion).toBe(expectedVersion);
   });
 });
 
