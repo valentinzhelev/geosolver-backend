@@ -8,7 +8,9 @@ const { computeLevelingCarnet } = require('../utils/levelingCarnet');
 const { computeCoordinateCarnet } = require('../utils/coordinateCarnet');
 const { getSharedProjectIds, getProjectAccess, getWorkspaceMembership, hasMinRole } = require('../utils/workspaceAccess');
 
-router.use(auth, requireFieldBookPilot);
+// Projects are the primary geodetic work object and must NOT depend on the Field Book pilot: only authentication is
+// required for /projects. The pilot gate applies to the Field Book resources below (a project's books and /books/*).
+router.use(auth);
 
 const VALID_TYPES = ['leveling', 'coordinate'];
 
@@ -130,7 +132,10 @@ router.delete('/projects/:id', async (req, res) => {
   }
 });
 
-// --- Field books ---
+// --- Field books (pilot access required) ---
+
+router.use('/projects/:projectId/books', requireFieldBookPilot);
+router.use('/books', requireFieldBookPilot);
 
 router.get('/projects/:projectId/books', async (req, res) => {
   try {
