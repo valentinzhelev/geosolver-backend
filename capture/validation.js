@@ -32,6 +32,7 @@ const MESSAGES = {
   VALUE_REQUIRED: 'Липсва задължителна стойност.',
   VALUE_INVALID: 'Стойността не е валидно число.',
   VALUE_AMBIGUOUS: 'Форматът на числото е двусмислен (точка/запетая). Въведете го ръчно.',
+  FORMAT_INFERRED: 'Форматът на числото е определен по останалите стойности в документа - проверете го.',
   LOW_CONFIDENCE: 'Ниска сигурност на разпознаването - проверете стойността.',
   DUPLICATE_POINT: 'Повтарящо се име на точка в това сканиране.',
   DECIMAL_SEPARATOR_MIXED: 'В колоната се използват различни десетични разделители.',
@@ -92,13 +93,20 @@ function evaluateTable(table, options = {}) {
   };
 
   // ---- numeric columns: parse each column TOGETHER (formatting is a column property) ------------------------
-  const columnStyles = {};
+  // pass 1: each column's own style; the decimal separator shared by ALL numeric columns is the document's style
+  const numericColumns = NUMERIC.flatMap((semantic) => bySemantic[semantic] || []);
+  const rawsOf = (colIndex) => t.rows.map((r) => { const c = r.cells.find((x) => x.col === colIndex); return c ? effectiveText(c) : ''; });
+  const ownSeps = new Set();
+  for (const colIndex of numericColumns) {
+    const { own } = parseColumn(rawsOf(colIndex));
+    if (own.decimalSep) ownSeps.add(own.decimalSep);
+  }
+  const documentStyle = ownSeps.size === 1 ? { decimalSep: [...ownSeps][0] } : null;
   for (const semantic of NUMERIC) {
     for (const colIndex of bySemantic[semantic] || []) {
       const cells = t.rows.map((r) => r.cells.find((c) => c.col === colIndex));
-      const raws = cells.map((c) => (c ? effectiveText(c) : ''));
-      const { parsed, style } = parseColumn(raws);
-      columnStyles[colIndex] = style;
+      const raws = rawsOf(colIndex);
+      const { parsed } = parseColumn(raws, documentStyle);
       cells.forEach((cell, i) => {
         if (!cell) return;
         const p = parsed[i];
@@ -140,6 +148,9 @@ function evaluateTable(table, options = {}) {
         add(cell, issue('VALUE_AMBIGUOUS', 'error', MESSAGES.VALUE_AMBIGUOUS, { field: semantic, reason: p.reason }));
       } else if (p.status === 'invalid') {
         add(cell, issue('VALUE_INVALID', 'error', MESSAGES.VALUE_INVALID, { field: semantic, reason: p.reason }));
+      } else if (p.status === 'ok' && p.format && p.format.definite === false) {
+        // the number is only readable through the column/document format, not by itself: review suggested
+        add(cell, issue('FORMAT_INFERRED', 'warning', MESSAGES.FORMAT_INFERRED, { field: semantic }));
       }
     }
     // OCR confidence: a cell the user has already corrected is treated as reviewed
@@ -236,7 +247,7 @@ function evaluateTable(table, options = {}) {
         cells: Object.fromEntries(
           ['point', 'code', 'x', 'y', 'h', 'notes']
             .map((s) => [s, cellAt(row, s)])
-            .filter(([, c]) => c && c.bbox)
+            .filter(([, c]) => c && c.bbox && !c.bbox.synthetic) // an empty cell has no source region
             .map(([s, c]) => [s, { col: c.col, page: c.page, bbox: c.bbox }])
         ),
       });

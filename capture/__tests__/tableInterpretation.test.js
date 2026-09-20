@@ -162,7 +162,9 @@ describe('deterministic validation (never changes a value)', () => {
   it('an ambiguous number is settled by the column\'s own definite cells, and only then', () => {
     const { table } = evaluate(['Point', 'X', 'Y'], [['1', '4700000,25', '500000,5'], ['2', '4700001,5', '500,123'], ['3', '4700002,5', '500001,5']]);
     expect(table.rows[1].cells[2].normalizedValue).toBe(500.123);
-    expect(table.rows[1].cells[2].validation.status).toBe('ok');
+    // readable only through the column's format -> a review WARNING, never a silent accept
+    expect(table.rows[1].cells[2].validation.issues.map((i) => i.code)).toEqual(['FORMAT_INFERRED']);
+    expect(table.rows[1].cells[2].validation.status).toBe('warning');
   });
 
   it('duplicate point identifiers inside the capture are errors on every occurrence (case-insensitive)', () => {

@@ -120,6 +120,29 @@ function reconstructTable(page, options = {}) {
   if (!basis.length) return { table: null, reason: 'NO_TABLE', diagnostics: { medianHeight: medianH, lines: lines.length } };
   const columns = columnIntervals(basis, medianH);
 
+  // A header over a column that has NO data in any row (e.g. an empty "Notes" column) must not be glued onto the nearest
+  // data column: it becomes a column of its own (with empty cells).
+  if (headerLine) {
+    const pad = 0.7 * medianH;
+    const extras = [];
+    for (const w of headerLine.words) {
+      const wx0 = w.bbox.x;
+      const wx1 = w.bbox.x + w.bbox.w;
+      // the header word touches (within the word gap) some data column -> it names that column
+      if (!columns.some((col) => wx0 <= col.x1 + pad && wx1 >= col.x0 - pad)) extras.push([wx0, wx1]);
+    }
+    extras.sort((p, q) => p[0] - q[0]);
+    const mergedExtras = [];
+    for (const [x0, x1] of extras) {
+      const last = mergedExtras[mergedExtras.length - 1];
+      if (last && x0 - last[1] <= pad) last[1] = Math.max(last[1], x1);
+      else mergedExtras.push([x0, x1]);
+    }
+    for (const [x0, x1] of mergedExtras) columns.push({ index: -1, x0, x1 });
+    columns.sort((p, q) => p.x0 - q.x0);
+    columns.forEach((col, i) => { col.index = i; });
+  }
+
   // header text per column
   const headerWords = new Map();
   if (headerLine) {

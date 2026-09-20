@@ -143,12 +143,17 @@ function inferColumnStyle(parsedCells) {
   return { decimalSep: null, mixed: seps.size > 1 };
 }
 
-/** Parses a whole column consistently: infer the style from definite cells, then resolve ambiguous ones with it. */
-function parseColumn(rawValues) {
+/**
+ * Parses a whole column consistently: infer the style from the column's own definite cells, then resolve ambiguous cells
+ * with it. A column with no definite cell of its own may fall back to `fallbackStyle` (the decimal separator shared by
+ * the other numeric columns of the same document); a resolved cell is marked `format.definite === false`.
+ */
+function parseColumn(rawValues, fallbackStyle = null) {
   const first = rawValues.map((v) => parseNumericCell(v));
-  const style = inferColumnStyle(first);
+  const own = inferColumnStyle(first);
+  const style = own.decimalSep ? own : fallbackStyle && fallbackStyle.decimalSep && !own.mixed ? { decimalSep: fallbackStyle.decimalSep, mixed: false, fromTable: true } : own;
   const parsed = first.map((p, i) => (p.status === 'ambiguous' && style.decimalSep ? parseNumericCell(rawValues[i], style) : p));
-  return { parsed, style };
+  return { parsed, style, own };
 }
 
 module.exports = { parseNumericCell, inferColumnStyle, parseColumn };
