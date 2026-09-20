@@ -171,8 +171,9 @@ assignmentSchema.methods.generateVariants = async function() {
   
   for (let i = 0; i < this.variantsCount; i++) {
     try {
-      const inputData = await template.generateTestData(i, null);
-      const solution = await template.generateSolution(inputData);
+      // inputData is what the student sees; solution stays server-side (ground truth when the
+      // trusted generator provides one — see utils/taskGroundTruth.js).
+      const { inputData, solution } = await template.generateVariantData(i, null);
       
       // Create solution hash for security
       const crypto = require('crypto');

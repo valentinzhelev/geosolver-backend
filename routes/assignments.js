@@ -10,6 +10,7 @@ const requireRole = require('../middleware/role');
 const Audit = require('../models/Audit');
 const { getTemplateByToolKey } = require('../utils/ensureMvpTemplates');
 const { includesId } = require('../utils/objectId');
+const { toStudentVariants } = require('../utils/studentVariantView');
 const { ASSIGNMENT_PRESETS } = require('../utils/assignmentPresets');
 const { createNotification, notifyCourseStudents } = require('../utils/notifications');
 
@@ -238,11 +239,8 @@ router.get('/:id', auth, async (req, res) => {
     if (isStudent && !isCreator && !isAdmin) {
       const studentAssignment = {
         ...assignment.toObject(),
-        variants: assignment.variants.map(variant => ({
-          variantIndex: variant.variantIndex,
-          inputData: variant.inputData,
-          // Don't include solution and solutionHash for students
-        }))
+        // Only variantIndex + inputData, reserved keys stripped; never solution / solutionHash
+        variants: toStudentVariants(assignment.variants)
       };
       return res.json({
         success: true,

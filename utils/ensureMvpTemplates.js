@@ -1,6 +1,23 @@
 const TaskTemplate = require('../models/TaskTemplate');
 const User = require('../models/User');
-const { MVP_EDU_TEMPLATES } = require('../data/mvpEduTemplates');
+const crypto = require('crypto');
+const { MVP_EDU_TEMPLATES, SUPERSEDED_DEFINITIONS } = require('../data/mvpEduTemplates');
+
+const scriptSha256 = (script) =>
+  crypto.createHash('sha256').update(String(script || '').trim().replace(/\r\n/g, '\n')).digest('hex');
+
+/**
+ * True only when BOTH stored scripts are byte-for-byte a PREVIOUS built-in definition that has since
+ * been corrected (data/mvpEduTemplates.js SUPERSEDED_DEFINITIONS). Like the trust backfill below it is
+ * a content match against known repo code — never a tag, an owner or any client-writable field.
+ */
+function matchesSupersededDefinition(toolKey, template) {
+  const generatorSha = scriptSha256(template.generatorScript);
+  const solutionSha = scriptSha256(template.solutionScript);
+  return (SUPERSEDED_DEFINITIONS[toolKey] || []).some(
+    (old) => old.generatorSha256 === generatorSha && old.solutionSha256 === solutionSha
+  );
+}
 
 async function getSystemOwnerId() {
   const admin = await User.findOne({ role: 'admin' }).select('_id');
@@ -13,11 +30,12 @@ async function getSystemOwnerId() {
 async function ensureMvpTemplates() {
   const ownerId = await getSystemOwnerId();
   if (!ownerId) {
-    return { created: 0, templates: [] };
+    return { created: 0, upgraded: 0, templates: [] };
   }
 
   const results = [];
   let created = 0;
+  let upgraded = 0;
 
   for (const def of MVP_EDU_TEMPLATES) {
     const tag = `tool:${def.toolKey}`;
@@ -51,6 +69,24 @@ async function ensureMvpTemplates() {
       });
       await template.save();
       created += 1;
+    } else if (template.isSystemTemplate === true && matchesSupersededDefinition(def.toolKey, template)) {
+      // Controlled update (Milestone 2.1). ALL provenance conditions must hold: the row is already a TRUSTED
+      // system template (isSystemTemplate is server-only, never client-writable) AND both scripts are EXACTLY
+      // a previous, corrected built-in. Only scripts/description/grading/params change; an untrusted, edited
+      // or foreign template never reaches this branch (an untrusted legacy row falls to the backfill below).
+      // Already-created Assignments are unaffected: their variants are snapshots (inputData + solution).
+      template.generatorScript = expectedGenerator;
+      template.solutionScript = expectedSolution;
+      template.description = def.description;
+      template.difficulty = def.difficulty;
+      template.gradingSettings = def.gradingSettings;
+      template.paramsSchema = {
+        toolKey: def.toolKey,
+        toolRoute: def.toolRoute,
+        answerKeys: def.answerKeys,
+      };
+      await template.save();
+      upgraded += 1;
     } else if (!template.isSystemTemplate) {
       // Legacy row seeded before `isSystemTemplate` existed, OR a
       // tag/isPublic collision from an untrusted source. Only backfill
@@ -81,7 +117,7 @@ async function ensureMvpTemplates() {
     });
   }
 
-  return { created, templates: results };
+  return { created, upgraded, templates: results };
 }
 
 async function getTemplateByToolKey(toolKey) {

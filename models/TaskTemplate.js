@@ -180,6 +180,19 @@ taskTemplateSchema.methods.generateSolution = async function(inputData) {
   }
 };
 
+// Generates ONE variant: the student-visible inputData and the server-side solution.
+// SECURITY: goes through generateTestData / generateSolution, so the Milestone 0 trust gate
+// (utils/templateTrust.js) still applies — an untrusted template is never executed. When a trusted
+// generator provides a reserved `__groundTruth` (utils/taskGroundTruth.js) it is removed from the
+// inputData and stored as the solution, so the answer never reaches the student payload.
+taskTemplateSchema.methods.generateVariantData = async function(variantIndex = 0, seed = null) {
+  const { splitGroundTruth } = require('../utils/taskGroundTruth');
+  const generated = await this.generateTestData(variantIndex, seed);
+  const { inputData, groundTruth } = splitGroundTruth(generated);
+  const solution = groundTruth !== undefined ? groundTruth : await this.generateSolution(inputData);
+  return { inputData, solution };
+};
+
 // Pre-save middleware to update usage statistics
 taskTemplateSchema.pre('save', function(next) {
   if (this.isModified('usageCount')) {

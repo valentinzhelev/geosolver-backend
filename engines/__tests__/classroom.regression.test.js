@@ -9,9 +9,11 @@ const { MVP_EDU_TEMPLATES } = require('../../data/mvpEduTemplates');
  * "fix" grading:
  *   1. grading never reads the canonical engine (it uses TaskTemplate scripts + Submission);
  *   2. the built-in template scripts are pinned by hash — any change is a deliberate, reviewed one;
- *   3. the KNOWN DEFECT is pinned: the built-in Resection template's answer key agrees with the
- *      engine for none of its own generated inputs. That is a DEPLOYMENT BLOCKER for the later
- *      release train (see the report); it is NOT fixed here and must not be fixed inside the engine.
+ *   3. Milestone 2.1 RESOLVED the two known defects (the Resection generator/answer key and the
+ *      Forward Intersection generator): both templates are now generated from real geometry and
+ *      aligned with the engine. The full 10,000-case proof lives in
+ *      data/__tests__/classroomGeodeticTemplates.test.js; this file keeps the pins and a smaller
+ *      cross-check so a silent change to any built-in script or to grading is caught.
  */
 
 const ROOT = path.join(__dirname, '..', '..');
@@ -50,8 +52,8 @@ describe('built-in template scripts are pinned (a change must be deliberate)', (
   const PINNED = {
     'first-basic-task': { gen: 'f98dc1c8885ffbd4b4758a26f92e213583b8f404203456b839d83490f03b5549', sol: '8b3429a625ca6344a9b92ab8b248d3a9ba763405c58ae4f4d2de5b400e0932b6' },
     'second-basic-task': { gen: 'd0ad1cf803937178f1ee65914a376ce963494f2c83727c245391837d8a55f846', sol: 'd80b1de618a3b9344d75acd5d770b764c2bc46fb8cae22f3e55eb9c7828c4ed2' },
-    'forward-intersection': { gen: '17b9e90ccf9a40abedecdf0bec528816a3b725da33576f328773da5eeda02539', sol: 'c04908ba3e69751e2df736feae1712790d231d8b0d6d899046d4409e26a6e4ad' },
-    resection: { gen: '6ae4e9d6ce618f839b924eae30d8af95db1640dfa3af793b863fcd70a9706229', sol: 'adb946cd63459ea54b8d9422d4d763562b6ff9c46944f5c545e83dc2900e7a1e' },
+    'forward-intersection': { gen: '7a9c4ca28e968e39689ca06536f82658a8c0b18826b722f67385285b937ce9bc', sol: 'c04908ba3e69751e2df736feae1712790d231d8b0d6d899046d4409e26a6e4ad' }, // generator corrected in Milestone 2.1; the answer formula is unchanged
+    resection: { gen: '49fb08acf81da072477bcc3fcd14d2e35e3bfc5e0121540191e305d02825a79b', sol: '7f04268a1fbe6b5e4251781f009b86d1b4905e850856d228f3f0337cd9777e35' }, // rebuilt in Milestone 2.1 (ground-truth answer, fail-closed solution script)
   };
 
   it('the four MVP calculator templates and their pinned generator/solution hashes', () => {
@@ -103,47 +105,40 @@ describe('template answer keys vs the canonical engine (characterization)', () =
     }
   });
 
-  it('forward-intersection: identical formula, BUT the generator can produce angle pairs the calculator rejects (sum >= 200 gon)', () => {
+  it('forward-intersection (Milestone 2.1): the generator is aligned — every generated task is accepted by the calculator and matches the key', () => {
+    const { SandboxExecutor } = require('../../utils/sandbox');
+    const { splitGroundTruth } = require('../../utils/taskGroundTruth');
+    const t = MVP_EDU_TEMPLATES.find((x) => x.toolKey === 'forward-intersection');
+    const executor = new SandboxExecutor();
     const engine = registry.getCurrentEngine('forward-intersection');
-    let accepted = 0;
-    let rejected = 0;
-    for (const { input, key } of sample('forward-intersection', 400)) {
-      let r;
-      try {
-        r = engine.run(input).resultData;
-      } catch (e) {
-        expect(e.code).toBe('ANGLE_SUM_TOO_LARGE');
-        rejected += 1;
-        continue;
-      }
-      accepted += 1;
+    for (let seed = 1; seed <= 300; seed++) {
+      const generated = executor.executeGenerator(t.generatorScript, 0, seed);
+      expect(generated.success).toBe(true);
+      const { inputData, groundTruth } = splitGroundTruth(generated.data);
+      const r = engine.run(inputData).resultData; // never rejected any more
+      expect(Math.abs(r.xP - groundTruth.xP)).toBeLessThanOrEqual(0.005);
+      expect(Math.abs(r.yP - groundTruth.yP)).toBeLessThanOrEqual(0.005);
+      const key = executor.executeSolution(t.solutionScript, inputData).data; // the (unchanged) formula still agrees
       expect(Math.abs(r.xP - key.xP)).toBeLessThanOrEqual(0.0011);
       expect(Math.abs(r.yP - key.yP)).toBeLessThanOrEqual(0.0011);
+      expect(inputData.beta1 + inputData.beta2).toBeLessThan(200);
     }
-    expect(accepted).toBeGreaterThan(200);
-    expect(rejected).toBeGreaterThan(0); // pre-existing: the frontend domain already rejected these; the engine simply matches it
   });
 
-  it('KNOWN DEFECT (pinned, deployment blocker): the built-in Resection key agrees with the v2 engine for NONE of its own generated inputs', () => {
+  it('resection (Milestone 2.1): the previously pinned defect is gone — generated tasks are accepted by the v2 engine and reproduce the known station', () => {
+    const { SandboxExecutor } = require('../../utils/sandbox');
+    const { splitGroundTruth } = require('../../utils/taskGroundTruth');
+    const t = MVP_EDU_TEMPLATES.find((x) => x.toolKey === 'resection');
+    const executor = new SandboxExecutor();
     const engine = registry.getCurrentEngine('resection');
-    let accepted = 0;
-    let rejected = 0;
-    let agree = 0;
-    for (const { input, key } of sample('resection', 500)) {
-      let r;
-      try {
-        r = engine.run(input).resultData;
-      } catch (e) {
-        expect(e.code).toBe('INCONSISTENT_ANGLES');
-        rejected += 1;
-        continue;
-      }
-      accepted += 1;
-      if (Math.hypot(r.xP - key.xP, r.yP - key.yP) < 0.01) agree += 1;
+    for (let seed = 1; seed <= 300; seed++) {
+      const generated = executor.executeGenerator(t.generatorScript, 0, seed);
+      expect(generated.success).toBe(true);
+      const { inputData, groundTruth } = splitGroundTruth(generated.data);
+      const r = engine.run(inputData).resultData; // INCONSISTENT_ANGLES is no longer possible
+      expect(Math.abs(r.xP - groundTruth.xP)).toBeLessThanOrEqual(0.005);
+      expect(Math.abs(r.yP - groundTruth.yP)).toBeLessThanOrEqual(0.005);
     }
-    expect(accepted).toBeGreaterThan(400); // v2 accepts most generated inputs...
-    expect(rejected).toBeGreaterThan(0); // ...and rejects a share of them as INCONSISTENT_ANGLES...
-    expect(agree).toBe(0); // ...but the answer key never matches. If this fails, the template OR the engine changed on purpose: review grading.
   });
 
   it('the canonical engine did not silently change grading: the template key scripts are executed unchanged by the sandbox path', () => {

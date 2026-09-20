@@ -1,0 +1,23 @@
+{
+  "_about": "The PREVIOUS built-in definitions (backend commit c935f8a) that Milestone 2.1 corrected. Trimmed exactly as ensureMvpTemplates stores them. Used only by ensureMvpTemplates.upgrade.test.js to prove the upgrade recognizes them by content.",
+  "forward-intersection": {
+    "description": "Координати на точка P по две известни точки и ъгли β₁, β₂.",
+    "generatorScript": "const yA = Math.round((200 + Math.random() * 400) * 1000) / 1000;\n      const xA = Math.round((200 + Math.random() * 400) * 1000) / 1000;\n      const yB = Math.round((yA + 150 + Math.random() * 200) * 1000) / 1000;\n      const xB = Math.round((xA + 120 + Math.random() * 180) * 1000) / 1000;\n      const beta1 = Math.round((30 + Math.random() * 80) * 1000) / 1000;\n      const beta2 = Math.round((25 + Math.random() * 70) * 1000) / 1000;\n      return { yA, xA, yB, xB, beta1, beta2 };",
+    "solutionScript": "const { yA, xA, yB, xB, beta1, beta2 } = inputData;\n      const deltaX = xB - xA;\n      const deltaY = yB - yA;\n      const sAB = Math.sqrt(deltaX * deltaX + deltaY * deltaY);\n      let alphaAB = Math.atan2(deltaY, deltaX) * 200 / Math.PI;\n      if (alphaAB < 0) alphaAB += 400;\n      let alphaBA = alphaAB + 200;\n      if (alphaBA >= 400) alphaBA -= 400;\n      let alphaAP = alphaAB - beta1;\n      if (alphaAP < 0) alphaAP += 400;\n      let alphaBP = alphaBA + beta2;\n      if (alphaBP >= 400) alphaBP -= 400;\n      const b1 = beta1 * Math.PI / 200;\n      const b2 = beta2 * Math.PI / 200;\n      const sum = b1 + b2;\n      const sAP = sAB * Math.sin(b2) / Math.sin(sum);\n      const sBP = sAB * Math.sin(b1) / Math.sin(sum);\n      const apRad = alphaAP * Math.PI / 200;\n      const bpRad = alphaBP * Math.PI / 200;\n      const xPrimP = xA + sAP * Math.cos(apRad);\n      const yPrimP = yA + sAP * Math.sin(apRad);\n      const xSecondP = xB + sBP * Math.cos(bpRad);\n      const ySecondP = yB + sBP * Math.sin(bpRad);\n      const xP = Math.round(((xPrimP + xSecondP) / 2) * 1000) / 1000;\n      const yP = Math.round(((yPrimP + ySecondP) / 2) * 1000) / 1000;\n      return { xP, yP };",
+    "gradingSettings": {
+      "tolerance": 0.01,
+      "toleranceType": "absolute",
+      "maxScore": 100
+    }
+  },
+  "resection": {
+    "description": "Позиция на точка P по три известни точки и два ъгъла.",
+    "generatorScript": "const xA = Math.round((100 + Math.random() * 200) * 1000) / 1000;\n      const yA = Math.round((100 + Math.random() * 200) * 1000) / 1000;\n      const xB = Math.round((xA + 120 + Math.random() * 80) * 1000) / 1000;\n      const yB = Math.round((yA + 40 + Math.random() * 60) * 1000) / 1000;\n      const xC = Math.round((xB - 40 + Math.random() * 100) * 1000) / 1000;\n      const yC = Math.round((yB + 100 + Math.random() * 80) * 1000) / 1000;\n      const beta1 = Math.round((40 + Math.random() * 60) * 1000) / 1000;\n      const beta2 = Math.round((35 + Math.random() * 55) * 1000) / 1000;\n      return { xA, yA, xB, yB, xC, yC, beta1, beta2 };",
+    "solutionScript": "const { xA, yA, xB, yB, xC, yC, beta1, beta2 } = inputData;\n      const beta1Rad = (beta1 * Math.PI) / 200;\n      const beta2Rad = (beta2 * Math.PI) / 200;\n      const dxAB = xB - xA;\n      const dyAB = yB - yA;\n      const dxBC = xC - xB;\n      const dyBC = yC - yB;\n      const angleA = Math.atan2(dyAB, dxAB);\n      const angleB = Math.atan2(dyBC, dxBC);\n      const sideAB = Math.sqrt(dxAB * dxAB + dyAB * dyAB);\n      const sideBC = Math.sqrt(dxBC * dxBC + dyBC * dyBC);\n      const angleAPB = Math.PI - beta1Rad;\n      const angleBPC = Math.PI - beta2Rad;\n      const sideAP = (sideAB * Math.sin(beta1Rad)) / Math.sin(angleAPB);\n      const sideBP = (sideBC * Math.sin(beta2Rad)) / Math.sin(angleBPC);\n      const xP1 = xA + sideAP * Math.cos(angleA + beta1Rad);\n      const yP1 = yA + sideAP * Math.sin(angleA + beta1Rad);\n      const xP2 = xB + sideBP * Math.cos(angleB - beta2Rad);\n      const yP2 = yB + sideBP * Math.sin(angleB - beta2Rad);\n      const xP = Math.round(((xP1 + xP2) / 2) * 1000) / 1000;\n      const yP = Math.round(((yP1 + yP2) / 2) * 1000) / 1000;\n      return { xP, yP };",
+    "gradingSettings": {
+      "tolerance": 0.01,
+      "toleranceType": "absolute",
+      "maxScore": 100
+    }
+  }
+}

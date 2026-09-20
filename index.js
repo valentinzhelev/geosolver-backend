@@ -11,9 +11,12 @@ mongoose.connect(process.env.MONGODB_URI, {
 }).then(async () => {
     console.log("Connected to MongoDB");
     try {
-      const { created } = await ensureMvpTemplates();
+      const { created, upgraded } = await ensureMvpTemplates();
       if (created > 0) {
         console.log(`Edu: seeded ${created} MVP task template(s)`);
+      }
+      if (upgraded > 0) {
+        console.log(`Edu: upgraded ${upgraded} MVP task template(s) to the corrected built-in definition`);
       }
     } catch (e) {
       console.warn('Edu: MVP template seed skipped:', e.message);

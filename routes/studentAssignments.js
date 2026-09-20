@@ -23,6 +23,7 @@ const {
   isLlmEnabled,
 } = require('../utils/gaiLlmService');
 const User = require('../models/User');
+const { stripReservedKeys, toStudentVariants, sanitizeStudentAnswers } = require('../utils/studentVariantView');
 
 // Get assignments for student
 router.get('/assignments', auth, requireRole('student'), async (req, res) => {
@@ -151,7 +152,7 @@ router.get('/assignments/:id', auth, requireRole('student'), async (req, res) =>
     }
     const studentVariantIdx = variantCount > 1 ? variantHash % variantCount : 0;
     const studentVariant = assignment.variants?.[studentVariantIdx];
-    const rawHintInput = studentVariant?.inputData;
+    const rawHintInput = stripReservedKeys(studentVariant?.inputData);
     const variantForHint =
       rawHintInput?.input && typeof rawHintInput.input === 'object'
         ? rawHintInput.input
@@ -168,11 +169,8 @@ router.get('/assignments/:id', auth, requireRole('student'), async (req, res) =>
     // Prepare assignment data for student (without solutions)
     const studentAssignment = {
       ...assignment.toObject(),
-      variants: assignment.variants.map(variant => ({
-        variantIndex: variant.variantIndex,
-        inputData: variant.inputData
-        // Don't include solution and solutionHash for students
-      })),
+      // Only variantIndex + inputData, reserved keys stripped; never solution / solutionHash
+      variants: toStudentVariants(assignment.variants),
       submission: submission ? {
         id: submission._id,
         status: submission.status,
@@ -277,7 +275,7 @@ router.post('/assignments/:id/submit', auth, requireRole('student'), async (req,
       assignment: assignment._id,
       student: req.userId,
       variantIndex,
-      answers,
+      answers: sanitizeStudentAnswers(answers),
       timeSpent: timeSpent || 0,
       isLate,
       latePenalty: 0,

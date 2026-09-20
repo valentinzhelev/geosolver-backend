@@ -383,8 +383,7 @@ router.post('/:id/test', auth, requireRole('admin'), async (req, res) => {
     const { variantIndex = 0, seed = null } = req.body;
 
     try {
-      const inputData = await template.generateTestData(variantIndex, seed);
-      const solution = await template.generateSolution(inputData);
+      const { inputData, solution } = await template.generateVariantData(variantIndex, seed);
 
       res.json({
         success: true,
