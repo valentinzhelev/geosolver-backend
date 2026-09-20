@@ -24,6 +24,22 @@ const surveyPointSchema = new mongoose.Schema(
     // Deliberately NO default — ordinary points must leave the field absent
     // (not null), which is what the partial unique index below relies on.
     sourceCalculationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Calculation' },
+    // Capture V2.1 provenance: set ONLY by the Capture import service (capture/importService.js), never from a
+    // request body (the /api/points routes build their documents from explicit allow-lists). Ordinary and
+    // calculation-generated points leave the whole field absent.
+    source: {
+      type: new mongoose.Schema(
+        {
+          kind: { type: String, enum: ['capture'] },
+          captureJobId: { type: mongoose.Schema.Types.ObjectId, ref: 'CaptureJob' },
+          row: { type: Number },
+          // semantic -> { col, page, bbox } of the OCR cell each value came from
+          cells: { type: mongoose.Schema.Types.Mixed },
+        },
+        { _id: false }
+      ),
+      default: undefined,
+    },
   },
   { timestamps: true }
 );
@@ -36,6 +52,13 @@ surveyPointSchema.index({ user: 1, name: 1 });
 surveyPointSchema.index(
   { sourceCalculationId: 1 },
   { unique: true, partialFilterExpression: { sourceCalculationId: { $type: 'objectId' } } }
+);
+
+// One imported row per (CaptureJob, row): a database-level guard that makes a repeated/concurrent confirm unable to
+// create duplicate points. Partial, so ordinary points are unaffected.
+surveyPointSchema.index(
+  { 'source.captureJobId': 1, 'source.row': 1 },
+  { unique: true, partialFilterExpression: { 'source.captureJobId': { $type: 'objectId' } } }
 );
 
 module.exports = mongoose.model('SurveyPoint', surveyPointSchema);
