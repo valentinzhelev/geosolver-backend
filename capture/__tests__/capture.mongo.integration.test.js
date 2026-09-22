@@ -12,9 +12,9 @@ const suite = URI && /localhost|127\.0\.0\.1/.test(URI) ? describe : describe.sk
 jest.setTimeout(90000);
 
 suite('Capture on a real MongoDB', () => {
-  let CaptureJob; let CaptureAsset; let SurveyPoint;
-  let jobService; let importService; let setProviderForTests; let H; let fixtures;
-  let capture;
+  let CaptureJob; let CaptureAsset; let SurveyPoint; let FieldObservationSet;
+  let jobService; let importService; let notebookImportService; let setProviderForTests; let H; let fixtures; let notebookFixtures;
+  let capture; let notebookCapture;
   const userId = new mongoose.Types.ObjectId();
   const projectId = new mongoose.Types.ObjectId();
 
@@ -23,13 +23,27 @@ suite('Capture on a real MongoDB', () => {
     CaptureJob = require('../../models/CaptureJob');
     CaptureAsset = require('../../models/CaptureAsset');
     SurveyPoint = require('../../models/SurveyPoint');
-    await Promise.all([CaptureJob.init(), CaptureAsset.init(), SurveyPoint.init()]);
+    FieldObservationSet = require('../../models/FieldObservationSet');
+    await Promise.all([CaptureJob.init(), CaptureAsset.init(), SurveyPoint.init(), FieldObservationSet.init()]);
     jobService = require('../jobService');
     importService = require('../importService');
+    notebookImportService = require('../notebook/importService');
     ({ setProviderForTests } = require('../providers'));
     fixtures = require('../../tests/support/captureFixtures');
     H = require('../../tests/support/captureApiHarness');
+    notebookFixtures = require('../../tests/support/notebookFixtures');
     capture = await H.makeCapture(['Точка', 'Код', 'X', 'Y', 'H'], fixtures.TRUTH.map((p) => [p.name, p.code, String(p.x), String(p.y), p.h === null ? '' : String(p.h)]));
+    const fmtGon = (n) => `${n.toFixed(4)}g`;
+    const nbSpec = { setups: [{
+      station: notebookFixtures.TRUTH.setups[0].station,
+      hi: String(notebookFixtures.TRUTH.setups[0].instrumentHeight),
+      orientationTarget: notebookFixtures.TRUTH.setups[0].orientation.target,
+      orientationDirection: fmtGon(notebookFixtures.TRUTH.setups[0].orientation.direction.value),
+      observations: notebookFixtures.TRUTH.setups[0].observations.map((o) => ({ target: o.target, hz: fmtGon(o.hz.value), vz: fmtGon(o.vz.value), distance: String(o.distance), prism: String(o.prism) })),
+    }] };
+    const nbLayout = notebookFixtures.layoutNotebook(nbSpec);
+    const nbImage = await notebookFixtures.renderTableImage(nbLayout);
+    notebookCapture = { layout: nbLayout, image: nbImage };
     setProviderForTests('google-vision', H.fixtureProvider(capture.layout));
   });
   afterAll(async () => {
@@ -94,6 +108,34 @@ suite('Capture on a real MongoDB', () => {
     await SurveyPoint.create({ user: userId, name: 'same', x: 1, y: 2 });
     await SurveyPoint.create({ user: userId, name: 'same', x: 1, y: 2 });
     expect(await SurveyPoint.countDocuments({ name: 'same' })).toBe(2);
+  });
+
+  it('V2.3: FieldObservationSet has a unique index on source.captureJobId (the real idempotency guard)', async () => {
+    const idx = await FieldObservationSet.collection.indexes();
+    const guard = idx.find((i) => i.key['source.captureJobId'] === 1);
+    expect(guard.unique).toBe(true);
+  });
+
+  it('V2.3 field-notebook pipeline -> stored draft -> confirm -> FieldObservationSet, through the real models; no SurveyPoint, no duplicate on a second confirm', async () => {
+    const job = await jobService.createJob({ userId, projectId: new mongoose.Types.ObjectId(), buffer: notebookCapture.image, originalName: 'notebook.png', mode: 'field-notebook' });
+    await jobService.processJob(job, {});
+    const reloaded = await CaptureJob.findById(job._id);
+    expect(reloaded.mode).toBe('field-notebook');
+    expect(reloaded.status).toBe('needs_review');
+    expect(reloaded.notebook.setups[0].station.point.rawText).toBe(notebookFixtures.TRUTH.setups[0].station);
+    expect(reloaded.validationSummary.canConfirm).toBe(true);
+
+    const result = await notebookImportService.confirmNotebookJob(reloaded);
+    expect(result.alreadyConfirmed).toBe(false);
+    const sets = await FieldObservationSet.find({ 'source.captureJobId': job._id }).lean();
+    expect(sets).toHaveLength(1);
+    expect(sets[0].setups[0].observations).toHaveLength(notebookFixtures.TRUTH.setups[0].observations.length);
+    expect(await SurveyPoint.countDocuments({})).toBe(0);
+
+    const again = await notebookImportService.confirmNotebookJob(await CaptureJob.findById(job._id));
+    expect(again.alreadyConfirmed).toBe(true);
+    expect(String(again.observationSetId)).toBe(String(sets[0]._id));
+    expect(await FieldObservationSet.countDocuments({ 'source.captureJobId': job._id })).toBe(1);
   });
 
   it('an existing project point with the same name is a conflict and nothing is written', async () => {
