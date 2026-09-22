@@ -13,7 +13,12 @@ const mongoose = require('mongoose');
  * "Създай точки" saves), never `setups`.
  *
  * Deliberately NOT bound to "polar setup" in its shape (`setups` is Mixed, and the model itself carries no
- * polar-specific fields) so a future traverse/network processing mode can reuse this same model.
+ * polar-specific fields) so other processing modes can reuse this same model - V2.4.2 adds TRAVERSE processing
+ * this way: `processingType` discriminates 'polar' (unchanged, uses `setups`, exactly as V2.4.1 persisted it) from
+ * 'traverse' (uses the new `traverse` field, see fieldProcessing/processTraverse.js#buildTraverseRun's return
+ * shape - sequence/start/orientation/end/legs/closure/adjustment). A document with no `processingType` at all
+ * (every run created before V2.4.2) reads as 'polar' via the schema default, so historical runs are read back
+ * exactly as before, never reinterpreted.
  */
 const fieldProcessingRunSchema = new mongoose.Schema(
   {
@@ -35,11 +40,14 @@ const fieldProcessingRunSchema = new mongoose.Schema(
     // here, so the field is kept for symmetry/explicitness rather than as a real choice).
     resultAuthority: { type: String, enum: ['server'], default: 'server', required: true },
     status: { type: String, enum: ['completed'], default: 'completed' }, // room to add e.g. 'failed' later
-    // [{ index, station, orientation, orientationConstantGon, bearingGon, observedHzToBacksightGon, setupError,
-    //    observations: [{ index, target, status, x, y, h, direction, horizontalDistance, deltaX, deltaY,
-    //                      heightReason, errors, warnings, cells }] }]
-    // exactly fieldProcessing/processRun.js#buildProcessingRun's output - the full reproducible record.
-    setups: { type: mongoose.Schema.Types.Mixed, required: true },
+    processingType: { type: String, enum: ['polar', 'traverse'], default: 'polar' },
+    // POLAR only. [{ index, station, orientation, orientationConstantGon, bearingGon, observedHzToBacksightGon,
+    //   setupError, observations: [{ index, target, status, x, y, h, direction, horizontalDistance, deltaX, deltaY,
+    //   heightReason, errors, warnings, cells }] }] - exactly processRun.js#buildProcessingRun's output.
+    setups: { type: mongoose.Schema.Types.Mixed, default: undefined },
+    // TRAVERSE only. { traverseType, startIdentifier, endIdentifier, sequence, start, orientation, end, legs,
+    //   closure, adjustment, status } - exactly processTraverse.js#buildTraverseRun's output.
+    traverse: { type: mongoose.Schema.Types.Mixed, default: undefined },
     generatedPointIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'SurveyPoint' }],
     pointsCreatedAt: { type: Date, default: null },
   },

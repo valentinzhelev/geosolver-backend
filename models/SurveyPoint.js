@@ -24,12 +24,16 @@ const surveyPointSchema = new mongoose.Schema(
     // Deliberately NO default — ordinary points must leave the field absent
     // (not null), which is what the partial unique index below relies on.
     sourceCalculationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Calculation' },
-    // Capture V2.1 / Field Processing V2.4.1 provenance: set ONLY by the respective import/create service
+    // Capture V2.1 / Field Processing V2.4.1-2 provenance: set ONLY by the respective import/create service
     // (capture/importService.js, routes/fieldProcessing.js), never from a request body (the /api/points routes
     // build their documents from explicit allow-lists). Ordinary and calculation-generated points leave the whole
     // field absent. Two kinds share this one sub-schema (kept together, not a Mongoose discriminator, since both
     // are small and the fields do not collide): 'capture' (row/cells from a coordinate-table CaptureJob) and
     // 'field-processing' (processingRunId/fieldObservationSetId/setup/observation from a FieldProcessingRun).
+    // `processingType` ('polar' default | 'traverse', V2.4.2) is purely informational provenance metadata - for a
+    // traverse-generated point, `setup`/`observation` are the OCCUPYING setup's index and the chosen foresight
+    // observation's row (a leg is uniquely identified by that same tuple, so it reuses the existing unique index
+    // below unchanged rather than needing a new one).
     source: {
       type: new mongoose.Schema(
         {
@@ -40,6 +44,7 @@ const surveyPointSchema = new mongoose.Schema(
           // kind: 'field-processing'
           processingRunId: { type: mongoose.Schema.Types.ObjectId, ref: 'FieldProcessingRun' },
           fieldObservationSetId: { type: mongoose.Schema.Types.ObjectId, ref: 'FieldObservationSet' },
+          processingType: { type: String, enum: ['polar', 'traverse'], default: 'polar' },
           setup: { type: Number },
           observation: { type: Number },
           // semantic -> { col, page, bbox } of the OCR cell each value came from (either kind)
