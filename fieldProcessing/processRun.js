@@ -228,4 +228,9 @@ async function buildProcessingRun(setups, { projectId, SurveyPointModel, vertica
   return results;
 }
 
-module.exports = { computeSetup, buildProcessingRun, applyDuplicateTargetWarnings, MESSAGES };
+module.exports = {
+  computeSetup, buildProcessingRun, applyDuplicateTargetWarnings, MESSAGES,
+  // Reused as-is by fieldProcessing/processTraverse.js (V2.4.2) so traverse legs resolve distance/height through
+  // the SAME rules as polar setups, rather than a second copy of this decision tree.
+  observedHzToBacksightGon, resolveHorizontalDistance, resolveHeight, issue, ENGINES,
+};
