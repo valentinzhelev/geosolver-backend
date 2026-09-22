@@ -31,9 +31,9 @@ const setupData = (index, over = {}) => ({
   index, station: { point: '101', instrumentHeight: meas(1.5), notes: '' }, orientation: { target: '102', direction: null }, observations: [obsRow(0)], ...over,
 });
 
-async function seedFieldObservationSet(setups, { user = H.OWNER, projectId = H.PROJECT } = {}) {
+async function seedFieldObservationSet(setups, { user = H.OWNER, projectId = H.PROJECT, captureJobId = CAPTURE_JOB_ID } = {}) {
   return FieldObservationSet.create({
-    user, projectId, source: { kind: 'capture', captureJobId: CAPTURE_JOB_ID },
+    user, projectId, source: { kind: 'capture', captureJobId },
     pipelineVersion: 'capture-2.3.0', recognitionVersion: 'v1', arbitrationVersion: 'v1', validationVersion: 'v1', notebookVersion: 'v1',
     setups,
   });
@@ -156,6 +156,27 @@ describe('GET /api/field-processing/:id and listing', () => {
     const b = (await post('/', { fieldObservationSetId: fos._id })).body.data;
     const res = await get(`?fieldObservationSetId=${fos._id}`);
     expect(res.body.data.map((r) => r.id)).toEqual([b.id, a.id]);
+  });
+
+  it('lists runs project-wide via ?projectId=, across different FieldObservationSets, newest first', async () => {
+    const fosA = await seedFieldObservationSet([setupData(0)], { captureJobId: '507f1f77bcf86cd799439ab1' });
+    const a = (await post('/', { fieldObservationSetId: fosA._id })).body.data;
+    await new Promise((r) => setTimeout(r, 2));
+    const fosB = await seedFieldObservationSet([setupData(0)], { captureJobId: '507f1f77bcf86cd799439ab2' });
+    const b = (await post('/', { fieldObservationSetId: fosB._id })).body.data;
+    const res = await get(`?projectId=${H.PROJECT}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.map((r) => r.id)).toEqual([b.id, a.id]);
+  });
+
+  it('?projectId= respects the same access rule as the fieldObservationSetId path (404 for no access, not 403)', async () => {
+    const res = await H.authed(app, 'get', `/api/field-processing?projectId=${H.OTHER_PROJECT}`, H.OWNER);
+    expect(res.status).toBe(404);
+  });
+
+  it('an invalid ?projectId= is rejected with 400', async () => {
+    const res = await get('?projectId=not-an-id');
+    expect(res.status).toBe(400);
   });
 });
 

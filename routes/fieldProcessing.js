@@ -183,6 +183,19 @@ router.post('/traverse', express.json({ limit: '64kb' }), wrap(async (req, res) 
 
 router.get('/', wrap(async (req, res) => {
   const fieldObservationSetId = req.query && req.query.fieldObservationSetId;
+  const projectId = req.query && req.query.projectId;
+
+  // Project-wide listing (added for the Project Processing workspace, V2.4.3): same access rule, same shape,
+  // just queried directly on FieldProcessingRun.projectId (already indexed) instead of joining through one
+  // FieldObservationSet. Purely additive - the fieldObservationSetId path below is completely unchanged.
+  if (projectId !== undefined) {
+    if (!mongoose.isValidObjectId(projectId)) return fail(res, 400, 'INVALID_REQUEST', 'Невалиден идентификатор на проект.');
+    const access = await getProjectAccess(req.userId, projectId);
+    if (!access.ok || !hasMinRole(access.role, 'editor')) return fail(res, 404, 'NOT_FOUND', 'Проектът не е намерен.');
+    const runs = await FieldProcessingRun.find({ projectId }).sort({ createdAt: -1 });
+    return res.json({ success: true, data: runs.map(publicRun) });
+  }
+
   if (!fieldObservationSetId || !mongoose.isValidObjectId(fieldObservationSetId)) {
     return fail(res, 400, 'INVALID_REQUEST', 'Липсва валиден идентификатор на набор от наблюдения.');
   }
