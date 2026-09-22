@@ -27,4 +27,16 @@ describe('traverse-closure v1', () => {
     expect(() => engine.run({ rawEndX: 0, rawEndY: 0, knownEndX: 1, knownEndY: 1, totalLength: 0 })).toThrow(EngineError);
     expect(() => engine.run({ rawEndX: 0, rawEndY: 0, knownEndX: 1, knownEndY: 1, totalLength: -10 })).toThrow(EngineError);
   });
+
+  it('NaN/Infinity never leak into a successful result, even for a misclosure just above the perfect-closure tolerance', () => {
+    // linearMisclosure here is 1e-8 m (just over the 1e-9 tolerance, so NOT perfectClosure): the division
+    // 400/1e-8 = 4e10 is a huge but perfectly FINITE number, never Infinity/NaN.
+    const r = engine.run({ rawEndX: 1e-8, rawEndY: 0, knownEndX: 0, knownEndY: 0, totalLength: 400 });
+    expect(r.resultData.perfectClosure).toBe(false);
+    for (const key of ['fX', 'fY', 'linearMisclosure', 'relativeClosureDenominator']) {
+      const v = r.resultData[key];
+      expect(Number.isFinite(v)).toBe(true);
+      expect(Number.isNaN(v)).toBe(false);
+    }
+  });
 });

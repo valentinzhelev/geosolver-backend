@@ -127,6 +127,18 @@ describe('H/J/K/L/M. height propagation', () => {
     expect(r.legs[0].rawX).toBeCloseTo(100, 6);
   });
 
+  it('J. a genuinely oblique zenith angle reduces slope distance to a DIFFERENT horizontal distance, not a pass-through', async () => {
+    // zenith = 50g (45 deg from vertical... i.e. 45 deg elevation): horizontalDistance = slope*sin(50g) = slope*sqrt(2)/2,
+    // independently computed as 100 * 0.70710678... = 70.710678... (NOT equal to the 100m slope - proves real reduction).
+    const setups = [setup(0, '101', '100', 1.5, [zenithObs('102', 200, 100, 50, null)]), setup(1, '102', '101', 1.5, [])];
+    const points = [point('100', -100, 0), point('101', 0, 0)];
+    const r = await run(setups, { traverseType: 'OPEN', startIdentifier: '101', verticalAngleConvention: 'zenith' }, points);
+    expect(r.legs[0].horizontalDistance).toBeCloseTo(100 * Math.sin((50 * Math.PI) / 200), 9);
+    expect(r.legs[0].horizontalDistance).not.toBeCloseTo(100, 3); // genuinely reduced, not a pass-through of the slope
+    expect(r.legs[0].rawX).toBeCloseTo(70.711, 3); // bearing 0g (north): rawX = horizontalDistance
+    expect(r.legs[0].rawY).toBeCloseTo(0, 6);
+  });
+
   it('L. height propagates leg-to-leg via zenith reduction, station H carried forward from the previous computed H', async () => {
     const setups = [
       setup(0, '101', '100', 1.5, [zenithObs('102', 200, 100.062, 100, 2.0)]), // horizontal leg (zenith=100g), slope=horizontal here
