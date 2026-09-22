@@ -532,6 +532,63 @@ describe('provider failure and logging hygiene', () => {
   });
 });
 
+describe('V2.1 backwards compatibility: an old job (pipelineVersion capture-2.1.0, old candidate shape) is read as-is', () => {
+  // shaped like what capture/reconstruct.js + capture/jobService.js produced BEFORE V2.2: no recognitionVersion /
+  // arbitrationVersion / validationVersion, no cell.arbitration / cell.symbolConfidence, and candidates whose
+  // `source` is the PROVIDER NAME (not the new 'primary' role).
+  const legacyCell = (col, semantic, rawText, normalizedValue, extra = {}) => ({
+    col, rawText, normalizedValue, semanticType: semantic, confidence: 0.98, page: 0,
+    bbox: { x: 10 + col * 100, y: 10, w: 80, h: 24 }, validation: { status: 'ok', issues: [] }, userValue: null,
+    candidates: [{ text: rawText, confidence: 0.98, source: 'google-vision' }], ...extra,
+  });
+  const legacyTable = () => ({
+    columns: [{ index: 0, headerText: 'Точка', semantic: 'point', mapping: 'ok' }, { index: 1, headerText: 'X', semantic: 'x', mapping: 'ok' }, { index: 2, headerText: 'Y', semantic: 'y', mapping: 'ok' }],
+    issues: [],
+    rows: [{ index: 0, status: 'ok', skipped: false, bbox: { x: 0, y: 0, w: 1, h: 1 }, cells: [legacyCell(0, 'point', 'P1', 'P1'), legacyCell(1, 'x', '4700000', 4700000), legacyCell(2, 'y', '500000', 500000)] }],
+  });
+
+  async function seedLegacyJob(status) {
+    const created = await CaptureJob.create({
+      user: H.OWNER, project: H.PROJECT, mode: 'coordinate-table', status, pipelineVersion: 'capture-2.1.0',
+      source: { originalName: 'legacy.png', mime: 'image/png', bytes: 10, width: 100, height: 100, sha256: 'x', assets: { review: 'a1', thumbnail: 'a2' }, review: { width: 100, height: 100 } },
+      table: legacyTable(),
+      validationSummary: { rows: 1, ready: 1, review: 0, invalid: 0, canConfirm: true },
+      revision: 0, importedPointIds: [], confirmClaimedAt: null,
+      ...(status === 'confirmed' ? { confirmedAt: new Date() } : {}),
+    });
+    return String(created._id);
+  }
+
+  it('GET reads a legacy job fine: no recognitionVersion/arbitrationVersion, candidates/arbitration render safely', async () => {
+    const id = await seedLegacyJob('needs_review');
+    const res = await get(id);
+    expect(res.status).toBe(200);
+    expect(res.body.data.pipelineVersion).toBe('capture-2.1.0');
+    expect(res.body.data.recognitionVersion).toBeNull();
+    expect(res.body.data.arbitrationVersion).toBeNull();
+    const cell = res.body.data.table.rows[0].cells[1];
+    expect(cell.candidates[0]).toMatchObject({ text: '4700000', source: 'google-vision' }); // untouched, old shape
+    expect(cell.symbolConfidence).toBeNull();
+  });
+
+  it('a legacy job already CONFIRMED is returned exactly as stored: it is never re-validated or re-arbitrated', async () => {
+    const id = await seedLegacyJob('confirmed');
+    const res = await get(id);
+    expect(res.body.data.status).toBe('confirmed');
+    expect(res.body.data.table.rows[0].cells[1].validation).toEqual({ status: 'ok', issues: [] }); // exactly as stored
+    // confirming it again is idempotent and touches nothing new
+    const again = await H.authed(app, 'post', `/api/capture/jobs/${id}/confirm`);
+    expect(again.body).toMatchObject({ alreadyConfirmed: true });
+  });
+
+  it('a legacy job still in needs_review can still be edited and confirmed (current rules re-validate it, as confirm always has)', async () => {
+    const id = await seedLegacyJob('needs_review');
+    const res = await H.authed(app, 'post', `/api/capture/jobs/${id}/confirm`);
+    expect(res.status).toBe(200);
+    expect(SurveyPoint.__all().map((p) => p.name)).toEqual(['P1']);
+  });
+});
+
 describe('the legacy scan endpoint is untouched', () => {
   it('/api/scan/extract-input is still mounted and still Pro-gated (auth first)', async () => {
     expect((await request(app).post('/api/scan/extract-input')).status).toBe(401);

@@ -183,4 +183,24 @@ async function runBenchmark(documents, { config } = {}) {
   return aggregateReports(reports);
 }
 
-module.exports = { evaluateDocument, aggregateReports, runBenchmark };
+/**
+ * Buckets per-document reports by a metadata field (e.g. 'handwriting': 'printed'|'handwritten'|'mixed') and
+ * aggregates each bucket separately - so a benchmark run over a mixed batch can honestly report, say, printed vs
+ * handwritten accuracy instead of one blended number that hides the weaker case. A document whose metadata lacks
+ * the field is bucketed under 'unknown'.
+ * @param {object[]} reports per-document reports (e.g. from evaluateDocument, or aggregate.perDocument)
+ * @param {string} metadataKey
+ * @returns {Object<string, object>} { [value]: aggregateReport }
+ */
+function aggregateByMetadata(reports, metadataKey) {
+  const buckets = new Map();
+  for (const r of reports) {
+    const value = (r.metadata && r.metadata[metadataKey]) ?? 'unknown';
+    (buckets.get(value) || buckets.set(value, []).get(value)).push(r);
+  }
+  const out = {};
+  for (const [value, group] of buckets) out[value] = aggregateReports(group);
+  return out;
+}
+
+module.exports = { evaluateDocument, aggregateReports, runBenchmark, aggregateByMetadata };

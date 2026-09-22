@@ -2,7 +2,7 @@
  * Capture evaluation harness tests, and the required synthetic acceptance benchmark:
  * "Expected synthetic false-accept rate: ZERO" (V2.2 section 18/19).
  */
-const { evaluateDocument, runBenchmark, aggregateReports } = require('../evaluation/harness');
+const { evaluateDocument, runBenchmark, aggregateReports, aggregateByMetadata } = require('../evaluation/harness');
 const { loadRealSamples } = require('../evaluation/fixtures/realSamples');
 const { layoutTable, renderTableImage, stripPrivate, TRUTH } = require('../../tests/support/captureFixtures');
 const { getConfig } = require('../config');
@@ -128,6 +128,39 @@ describe('aggregateReports', () => {
     expect(agg.columnMappingAccuracy).toBe(1); // only the first document had a value
     expect(agg.missedCells).toBe(3);
     expect(agg.falseAcceptRate).toBe(0);
+  });
+});
+
+describe('aggregateByMetadata: slicing a benchmark by metadata (e.g. printed vs handwritten)', () => {
+  it('buckets and aggregates separately per metadata value, so one weak bucket cannot hide behind a strong one', async () => {
+    const printed = await buildDocument({ metadata: { handwriting: 'printed' } });
+    // synthetic fixtures cannot actually render handwriting (see the honesty note below): this only proves the
+    // SLICING mechanism works, not that GeoSolver has any measured handwriting accuracy.
+    const labelledHandwritten = await buildDocument({ metadata: { handwriting: 'handwritten' } });
+    const reports = [await evaluateDocument({ ...printed, config }), await evaluateDocument({ ...labelledHandwritten, config })];
+    const byHandwriting = aggregateByMetadata(reports, 'handwriting');
+    expect(Object.keys(byHandwriting).sort()).toEqual(['handwritten', 'printed']);
+    expect(byHandwriting.printed.documents).toBe(1);
+    expect(byHandwriting.handwritten.documents).toBe(1);
+  });
+
+  it('a document with no value for the key is bucketed under "unknown", not dropped', () => {
+    const agg = aggregateByMetadata([{ metadata: {}, acceptedCells: 1, falseAcceptedCells: 0 }], 'handwriting');
+    expect(Object.keys(agg)).toEqual(['unknown']);
+  });
+});
+
+describe('HONESTY NOTE (V2.2 section 13): synthetic fixtures cannot measure real handwriting accuracy', () => {
+  it('the synthetic fixture renderer draws geometric placeholders, not glyphs - it cannot stand in for real handwritten samples', async () => {
+    // tests/support/captureFixtures.js renders dark RECTANGLES per word (see renderTableImage), not actual character
+    // shapes. This is why V2.2 never asserts a handwriting accuracy NUMBER from these fixtures: doing so would be
+    // exactly the "tune against synthetic examples and call it production accuracy" the spec forbids. The metadata
+    // tag and aggregateByMetadata exist so a REAL, labelled sample set (capture/evaluation/fixtures/real/, see
+    // manifest.schema.json) can report this honestly once it exists - see the V2.2 final report, section O.
+    const doc = await buildDocument({ metadata: { handwriting: 'handwritten' } });
+    const report = await evaluateDocument({ ...doc, config });
+    // the pipeline still runs end-to-end (nothing crashes on the metadata tag) - that is all this proves
+    expect(report.tableDetected).toBe(true);
   });
 });
 
