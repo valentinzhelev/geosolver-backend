@@ -62,6 +62,25 @@ const CaptureJob = {
     return wrapJob(snap);
   },
   async findById(id) { const s = jobStore.rows.get(String(id)); return s ? wrapJob(s) : null; },
+  /** minimal chainable query: find(filter).sort({field:1|-1}).limit(n) - enough for capture/jobService.js#listJobs */
+  find(filter = {}) {
+    let sortSpec = null;
+    let limitN = null;
+    const q = {
+      sort(spec) { sortSpec = spec; return q; },
+      limit(n) { limitN = n; return q; },
+      then(resolve, reject) {
+        let arr = [...jobStore.rows.values()].filter((s) => matches(s, filter)).map((s) => wrapJob(s));
+        if (sortSpec) {
+          const [key, dir] = Object.entries(sortSpec)[0];
+          arr.sort((a, b) => (a[key] > b[key] ? 1 : a[key] < b[key] ? -1 : 0) * dir);
+        }
+        if (limitN) arr = arr.slice(0, limitN);
+        return Promise.resolve(arr).then(resolve, reject);
+      },
+    };
+    return q;
+  },
   async findOneAndUpdate(filter, update) {
     for (const [id, snap] of jobStore.rows) {
       if (matches(snap, filter)) {

@@ -190,6 +190,39 @@ describe('creating a job produces a DRAFT only', () => {
   });
 });
 
+describe('GET /jobs?projectId=... (Capture history)', () => {
+  it('lists a project\'s jobs newest first, as summaries only (no table, no candidates, no image bytes)', async () => {
+    const first = (await upload()).body.data.id;
+    await new Promise((r) => setTimeout(r, 2));
+    const second = (await upload()).body.data.id;
+    const res = await H.authed(app, 'get', `/api/capture/jobs?projectId=${H.PROJECT}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.map((j) => j.id)).toEqual([second, first]); // newest first
+    const row = res.body.data[0];
+    expect(row).toMatchObject({ status: 'needs_review', rows: 3, invalid: 0, importedCount: 0 });
+    expect(row.table).toBeUndefined();
+    expect(row.thumbnail).toBe(`/api/capture/jobs/${second}/image/thumbnail`);
+  });
+
+  it('reflects confirmation (importedCount) and stays scoped to the calling user and project', async () => {
+    const mineOtherProject = (await upload({ projectId: H.SHARED_PROJECT })); // I am not a member here
+    expect(mineOtherProject.status).toBe(403);
+    const id = (await upload()).body.data.id;
+    await H.authed(app, 'post', `/api/capture/jobs/${id}/confirm`);
+    const mine = await H.authed(app, 'get', `/api/capture/jobs?projectId=${H.PROJECT}`);
+    expect(mine.body.data[0]).toMatchObject({ status: 'confirmed', importedCount: 3 });
+    // another user, even with project access, does not see MY capture jobs (jobs stay private to their uploader)
+    FieldBookProject.findById.mockImplementation(async (pid) => (String(pid) === H.PROJECT ? { _id: H.PROJECT, user: H.OTHER, workspace: 'ws1', crs: 'EPSG:7800' } : null));
+    const theirs = await H.authed(app, 'get', `/api/capture/jobs?projectId=${H.PROJECT}`, H.OTHER);
+    expect(theirs.body.data).toEqual([]);
+  });
+
+  it('requires a project id and project access, like every other Capture route', async () => {
+    expect((await H.authed(app, 'get', '/api/capture/jobs')).status).toBe(400);
+    expect((await H.authed(app, 'get', `/api/capture/jobs?projectId=${H.OTHER_PROJECT}`)).status).toBe(403);
+  });
+});
+
 describe('review edits (corrections are stored separately and validation re-runs)', () => {
   const patch = (id, body) => H.authed(app, 'patch', `/api/capture/jobs/${id}/cells`).send(body);
 
@@ -254,6 +287,61 @@ describe('review edits (corrections are stored separately and validation re-runs
     const id = (await upload()).body.data.id;
     const res = await patch(id, { edits: [{ row: 0, col: 5, value: 'note  ok' }] });
     expect(res.body.data.table.rows[0].cells[5].userValue).toBe('note ok');
+  });
+});
+
+describe('row exclusion ("Не импортирай този ред"): explicit and reversible', () => {
+  const patch = (id, body) => H.authed(app, 'patch', `/api/capture/jobs/${id}/cells`).send(body);
+
+  it('excludes a row from validation and the summary; the row itself and its OCR evidence remain', async () => {
+    const id = (await upload()).body.data.id;
+    const before = (await get(id)).body.data;
+    expect(before.validationSummary).toMatchObject({ rows: 3, excluded: 0 });
+
+    const res = await patch(id, { rows: [{ index: 1, excluded: true }] });
+    expect(res.status).toBe(200);
+    expect(res.body.data.validationSummary).toMatchObject({ rows: 2, excluded: 1, canConfirm: true });
+    const excludedRow = res.body.data.table.rows[1];
+    expect(excludedRow).toMatchObject({ excluded: true, status: 'excluded' });
+    expect(excludedRow.cells[0].rawText).toBe('P2'); // OCR evidence is preserved, not deleted
+  });
+
+  it('an excluded row never blocks confirmation, even if it would otherwise be invalid', async () => {
+    const bad = H.fixtureProvider(capture.layout, { mutate: (w) => w.map((x) => (x.text === '4700100.50' ? { ...x, text: '47OO100.50', confidence: 0.4 } : x)) });
+    setProviderForTests('google-vision', bad);
+    const id = (await upload()).body.data.id;
+    expect((await get(id)).body.data.validationSummary.canConfirm).toBe(false);
+    const excluded = await patch(id, { rows: [{ index: 1, excluded: true }] });
+    expect(excluded.body.data.validationSummary.canConfirm).toBe(true);
+  });
+
+  it('is reversible: re-including the row restores its normal validation state', async () => {
+    const id = (await upload()).body.data.id;
+    await patch(id, { rows: [{ index: 0, excluded: true }] });
+    const restored = await patch(id, { rows: [{ index: 0, excluded: false }] });
+    expect(restored.body.data.table.rows[0].excluded).toBe(false);
+    expect(restored.body.data.table.rows[0].status).not.toBe('excluded');
+    expect(restored.body.data.validationSummary).toMatchObject({ rows: 3, excluded: 0 });
+  });
+
+  it('an excluded row is never imported; the remaining rows keep their own row index and import normally', async () => {
+    const id = (await upload()).body.data.id;
+    await patch(id, { rows: [{ index: 1, excluded: true }] });
+    const res = await H.authed(app, 'post', `/api/capture/jobs/${id}/confirm`);
+    expect(res.status).toBe(200);
+    expect(res.body.importedCount).toBe(2);
+    const points = SurveyPoint.__all();
+    expect(points.map((p) => p.name)).toEqual(['P1', 'P3']);
+    expect(points.map((p) => p.source.row)).toEqual([0, 2]);
+  });
+
+  it('invalid row-exclusion requests are refused (400) and change nothing', async () => {
+    const id = (await upload()).body.data.id;
+    for (const body of [{ rows: [{ index: 'x', excluded: true }] }, { rows: [{ index: 0, excluded: 'yes' }] }, { rows: [{ index: 99, excluded: true }] }]) {
+      const res = await patch(id, body);
+      expect(res.status).toBe(400);
+    }
+    expect(CaptureJob.__all().find((j) => j._id === id).revision).toBe(0);
   });
 });
 

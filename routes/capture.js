@@ -2,6 +2,7 @@
  * Capture V2.1 API (coordinate tables).
  *
  *   POST   /api/capture/jobs                 upload an image for a project -> OCR -> reconstructed draft table
+ *   GET    /api/capture/jobs?projectId=...   Capture history for a project (summaries only, newest first)
  *   GET    /api/capture/jobs/:id             the job (table, cell states, summary)
  *   GET    /api/capture/jobs/:id/image/:kind review | thumbnail image (authenticated)
  *   PATCH  /api/capture/jobs/:id/cells       review corrections and column mapping (rawText is never changed)
@@ -19,7 +20,7 @@ const CaptureJob = require('../models/CaptureJob');
 const { getProjectAccess, hasMinRole } = require('../utils/workspaceAccess');
 const { getConfig } = require('../capture/config');
 const { CaptureError, isCaptureError } = require('../capture/errors');
-const { createJob, processJob, applyReviewEdits, publicJob } = require('../capture/jobService');
+const { createJob, processJob, applyReviewEdits, publicJob, listJobs } = require('../capture/jobService');
 const { confirmJob } = require('../capture/importService');
 const { assertWithinQuota } = require('../capture/quota');
 const { getStorage } = require('../capture/storage');
@@ -72,6 +73,14 @@ router.post('/jobs', (req, res, next) => {
   await processJob(job, ctx);
   if (job.status === 'failed') return fail(res, new CaptureError(job.failure.code), String(job._id));
   return res.status(201).json({ success: true, data: publicJob(job) });
+}));
+
+router.get('/jobs', wrap(async (req, res) => {
+  const projectId = req.query && req.query.projectId;
+  if (!projectId || !mongoose.isValidObjectId(projectId)) throw new CaptureError('PROJECT_REQUIRED');
+  await requireProjectEditor(req.userId, projectId); // re-checked on every call, like every other route here
+  const jobs = await listJobs(req.userId, projectId, { limit: req.query.limit });
+  res.json({ success: true, data: jobs });
 }));
 
 router.get('/jobs/:id', wrap(async (req, res) => {
