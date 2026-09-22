@@ -51,6 +51,14 @@ function fmtDMS(decimalDegrees, secondsDecimals = 1) {
   return `${sign}${deg}°${String(min).padStart(2, '0')}'${secPadded}"`;
 }
 
+/** A raw {value, unit} angle reading exactly as recorded (never force-converted to a different unit for display).
+ *  A FieldObservationSet only ever stores 'gon' or 'deg' (capture/notebook resolves any ambiguity before
+ *  confirmation), so those are the only two branches. */
+function fmtAngleRaw(angle, decimals = 4) {
+  if (!angle || !finite(angle.value)) return DASH;
+  return angle.unit === 'deg' ? fmtDeg(angle.value, decimals) : fmtGon(angle.value, decimals);
+}
+
 /** A relative closure ratio "1 : N" - never a fabricated N when the denominator is unavailable/undefined. */
 function fmtRelativeClosure(denominator, bg = true) {
   if (!finite(denominator)) return DASH;
@@ -64,4 +72,4 @@ function fmtDateTime(value, bg = true) {
   return d.toLocaleString(bg ? 'bg-BG' : 'en-GB', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
-module.exports = { fmtCoord, fmtHeight, heightUnavailableLabel, fmtDistance, fmtGon, fmtDeg, fmtDMS, fmtRelativeClosure, fmtDateTime, DASH };
+module.exports = { fmtCoord, fmtHeight, heightUnavailableLabel, fmtDistance, fmtGon, fmtDeg, fmtDMS, fmtAngleRaw, fmtRelativeClosure, fmtDateTime, DASH };
