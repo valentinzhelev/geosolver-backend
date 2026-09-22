@@ -111,8 +111,29 @@ function query(rowsFn) {
   return q;
 }
 
+/** Both partial-unique-index guards SurveyPoint.js declares, simulated here for the fakes. */
+function duplicateKeyOf(d) {
+  if (d.source && d.source.captureJobId) return `capture:${d.source.captureJobId}:${d.source.row}`;
+  if (d.source && d.source.processingRunId) return `field-processing:${d.source.processingRunId}:${d.source.setup}:${d.source.observation}`;
+  return null;
+}
+
 const SurveyPoint = {
   find(filter = {}) { return query(() => [...pointStore.rows.values()].filter((p) => matches(p, filter))); },
+  async create(d) {
+    const key = duplicateKeyOf(d);
+    if (key && [...pointStore.rows.values()].some((p) => duplicateKeyOf(p) === key)) {
+      const err = new Error('E11000 duplicate key error');
+      err.code = 11000;
+      throw err;
+    }
+    const snap = clone({
+      code: '', h: null, notes: '', layer: 'default', ...d, _id: newId(), user: String(d.user), projectId: d.projectId ? String(d.projectId) : null,
+      source: d.source && { ...d.source, captureJobId: d.source.captureJobId ? String(d.source.captureJobId) : undefined, processingRunId: d.source.processingRunId ? String(d.source.processingRunId) : undefined, fieldObservationSetId: d.source.fieldObservationSetId ? String(d.source.fieldObservationSetId) : undefined },
+    });
+    pointStore.rows.set(snap._id, snap);
+    return clone(snap);
+  },
   async insertMany(docs) {
     const created = [];
     for (const d of docs) {
@@ -159,9 +180,55 @@ const FieldObservationSet = {
     const found = [...observationSetStore.rows.values()].find((d) => matches(d, filter));
     return found ? clone(found) : null;
   },
+  async findById(id) { const s = observationSetStore.rows.get(String(id)); return s ? clone(s) : null; },
   find(filter = {}) { return query(() => [...observationSetStore.rows.values()].filter((d) => matches(d, filter))); },
   __reset() { observationSetStore.rows.clear(); },
   __all() { return [...observationSetStore.rows.values()].map(clone); },
+};
+
+/* ------------------------------------------------------------- FieldProcessingRun (V2.4.1) */
+const processingRunStore = makeStore('FieldProcessingRun');
+
+function wrapRun(snapshot) {
+  const doc = clone(snapshot);
+  Object.defineProperties(doc, {
+    save: { enumerable: false, value: async function save() { const plain = plainOf(this); plain.updatedAt = new Date(); processingRunStore.rows.set(plain._id, clone(plain)); this.updatedAt = plain.updatedAt; return this; } },
+    toObject: { enumerable: false, value: function toObject() { return plainOf(this); } },
+  });
+  return doc;
+}
+
+const FieldProcessingRun = {
+  async create(data) {
+    const now = new Date();
+    const snap = clone({
+      generatedPointIds: [], pointsCreatedAt: null, status: 'completed', resultAuthority: 'server', ...data,
+      _id: newId(), createdAt: now, updatedAt: now,
+    });
+    snap.user = String(snap.user);
+    snap.projectId = String(snap.projectId);
+    snap.source = { fieldObservationSetId: String(snap.source.fieldObservationSetId), captureJobId: String(snap.source.captureJobId) };
+    processingRunStore.rows.set(snap._id, snap);
+    return wrapRun(snap);
+  },
+  async findById(id) { const s = processingRunStore.rows.get(String(id)); return s ? wrapRun(s) : null; },
+  find(filter = {}) {
+    let sortSpec = null;
+    const q = {
+      sort(spec) { sortSpec = spec; return q; },
+      then(resolve, reject) {
+        let arr = [...processingRunStore.rows.values()].filter((s) => matches(s, filter)).map((s) => wrapRun(s));
+        if (sortSpec) {
+          const [key, dir] = Object.entries(sortSpec)[0];
+          arr.sort((a, b) => (a[key] > b[key] ? 1 : a[key] < b[key] ? -1 : 0) * dir);
+        }
+        return Promise.resolve(arr).then(resolve, reject);
+      },
+    };
+    return q;
+  },
+  __reset() { processingRunStore.rows.clear(); },
+  __all() { return [...processingRunStore.rows.values()].map(clone); },
 };
 
 /* -------------------------------------------------------------------- Storage */
@@ -176,4 +243,4 @@ function createMemoryStorage() {
   };
 }
 
-module.exports = { CaptureJob, SurveyPoint, FieldObservationSet, createMemoryStorage, newId };
+module.exports = { CaptureJob, SurveyPoint, FieldObservationSet, FieldProcessingRun, createMemoryStorage, newId };

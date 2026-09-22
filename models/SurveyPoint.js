@@ -24,16 +24,25 @@ const surveyPointSchema = new mongoose.Schema(
     // Deliberately NO default — ordinary points must leave the field absent
     // (not null), which is what the partial unique index below relies on.
     sourceCalculationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Calculation' },
-    // Capture V2.1 provenance: set ONLY by the Capture import service (capture/importService.js), never from a
-    // request body (the /api/points routes build their documents from explicit allow-lists). Ordinary and
-    // calculation-generated points leave the whole field absent.
+    // Capture V2.1 / Field Processing V2.4.1 provenance: set ONLY by the respective import/create service
+    // (capture/importService.js, routes/fieldProcessing.js), never from a request body (the /api/points routes
+    // build their documents from explicit allow-lists). Ordinary and calculation-generated points leave the whole
+    // field absent. Two kinds share this one sub-schema (kept together, not a Mongoose discriminator, since both
+    // are small and the fields do not collide): 'capture' (row/cells from a coordinate-table CaptureJob) and
+    // 'field-processing' (processingRunId/fieldObservationSetId/setup/observation from a FieldProcessingRun).
     source: {
       type: new mongoose.Schema(
         {
-          kind: { type: String, enum: ['capture'] },
+          kind: { type: String, enum: ['capture', 'field-processing'] },
+          // kind: 'capture'
           captureJobId: { type: mongoose.Schema.Types.ObjectId, ref: 'CaptureJob' },
           row: { type: Number },
-          // semantic -> { col, page, bbox } of the OCR cell each value came from
+          // kind: 'field-processing'
+          processingRunId: { type: mongoose.Schema.Types.ObjectId, ref: 'FieldProcessingRun' },
+          fieldObservationSetId: { type: mongoose.Schema.Types.ObjectId, ref: 'FieldObservationSet' },
+          setup: { type: Number },
+          observation: { type: Number },
+          // semantic -> { col, page, bbox } of the OCR cell each value came from (either kind)
           cells: { type: mongoose.Schema.Types.Mixed },
         },
         { _id: false }
@@ -59,6 +68,14 @@ surveyPointSchema.index(
 surveyPointSchema.index(
   { 'source.captureJobId': 1, 'source.row': 1 },
   { unique: true, partialFilterExpression: { 'source.captureJobId': { $type: 'objectId' } } }
+);
+
+// One point per (FieldProcessingRun, setup, observation): the database-level guard that makes a repeated/
+// concurrent "Създай точки" unable to create duplicates (V2.4.1). Partial, so ordinary/capture/calculation points
+// are unaffected.
+surveyPointSchema.index(
+  { 'source.processingRunId': 1, 'source.setup': 1, 'source.observation': 1 },
+  { unique: true, partialFilterExpression: { 'source.processingRunId': { $type: 'objectId' } } }
 );
 
 module.exports = mongoose.model('SurveyPoint', surveyPointSchema);

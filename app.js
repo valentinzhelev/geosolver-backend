@@ -55,6 +55,7 @@ const gnssFieldLogRoutes = require('./routes/gnssFieldLog');
 const teacherTemplatesRoutes = require('./routes/teacherTemplates');
 const scanRoutes = require('./routes/scan');
 const captureRoutes = require('./routes/capture');
+const fieldProcessingRoutes = require('./routes/fieldProcessing');
 const projectCalculationsRoutes = require('./routes/projectCalculations');
 const localeMiddleware = require('./middleware/locale');
 
@@ -155,6 +156,7 @@ app.use('/api/gnss-field-log', gnssFieldLogRoutes);
 app.use('/api/teacher/templates', teacherTemplatesRoutes);
 app.use('/api/scan', scanRoutes);
 app.use('/api/capture', captureRoutes); // Capture V2.1 (the legacy /api/scan flow is intentionally untouched)
+app.use('/api/field-processing', fieldProcessingRoutes); // Field Processing V2.4.1 (deterministic, server-authoritative)
 app.use('/api/projects', projectCalculationsRoutes);
 app.use('/api/billing', billingRoutes);
 
