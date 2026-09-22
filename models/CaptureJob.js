@@ -15,7 +15,9 @@ const captureJobSchema = new mongoose.Schema(
   {
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     project: { type: mongoose.Schema.Types.ObjectId, ref: 'FieldBookProject', required: true, index: true },
-    mode: { type: String, enum: ['coordinate-table'], default: 'coordinate-table' },
+    // V2.3: a second mode, 'field-notebook', alongside the original 'coordinate-table'. The mode is fixed for the
+    // life of a job (set once at upload) and decides which of `table`/`notebook` below is populated.
+    mode: { type: String, enum: ['coordinate-table', 'field-notebook'], default: 'coordinate-table' },
     status: { type: String, enum: STATUSES, default: 'uploaded', index: true },
     pipelineVersion: { type: String, required: true },
     // V2.2: which version of each deterministic stage produced this job's table, so a V2.1 job (where these are
@@ -23,6 +25,7 @@ const captureJobSchema = new mongoose.Schema(
     recognitionVersion: { type: String },
     arbitrationVersion: { type: String },
     validationVersion: { type: String },
+    notebookVersion: { type: String }, // V2.3: the notebook validator version (mode: field-notebook only)
 
     source: {
       originalName: { type: String, default: '' }, // sanitized display label only; never used for storage
@@ -52,7 +55,8 @@ const captureJobSchema = new mongoose.Schema(
       rerecognitionPasses: { type: Number }, // V2.2: extra provider calls spent re-reading uncertain cells
     },
 
-    table: { type: mongoose.Schema.Types.Mixed, default: null },
+    table: { type: mongoose.Schema.Types.Mixed, default: null }, // mode: coordinate-table
+    notebook: { type: mongoose.Schema.Types.Mixed, default: null }, // mode: field-notebook (V2.3)
     validationSummary: { type: mongoose.Schema.Types.Mixed, default: null },
     crs: { type: String, default: null }, // project CRS at the time of the last validation
 
@@ -64,7 +68,8 @@ const captureJobSchema = new mongoose.Schema(
     revision: { type: Number, default: 0 }, // incremented by every review edit (optimistic concurrency)
 
     confirmedAt: { type: Date },
-    importedPointIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'SurveyPoint' }],
+    importedPointIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'SurveyPoint' }], // mode: coordinate-table
+    importedFieldObservationSetId: { type: mongoose.Schema.Types.ObjectId, ref: 'FieldObservationSet' }, // mode: field-notebook
     // set atomically by the first confirm to claim the import (idempotency / concurrency guard)
     confirmClaimedAt: { type: Date, default: null },
 

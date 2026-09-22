@@ -17,6 +17,7 @@ const MESSAGES = {
   PROVIDER_UNAVAILABLE: 'Разпознаването временно не е възможно. Опитайте отново по-късно.',
   PREPROCESS_FAILED: 'Изображението не можа да бъде обработено.',
   NO_TABLE_DETECTED: 'Не беше открита таблица с координати. Опитайте с по-ясна снимка.',
+  NO_NOTEBOOK_DETECTED: 'Не беше разпозната поле-книжка (станция/наблюдения). Опитайте с по-ясна снимка.',
   NOT_FOUND: 'Сканирането не е намерено.',
   INVALID_STATE: 'Действието не е възможно в текущото състояние на сканирането.',
   INVALID_REQUEST: 'Невалидна заявка.',
@@ -31,7 +32,7 @@ const MESSAGES = {
 const STATUS = {
   INVALID_IMAGE: 400, UNSUPPORTED_MEDIA_TYPE: 415, IMAGE_TOO_LARGE: 413, IMAGE_TOO_MANY_PIXELS: 413, IMAGE_TOO_SMALL: 400,
   NO_FILE: 400, PROJECT_REQUIRED: 400, PROJECT_FORBIDDEN: 403, QUOTA_EXCEEDED: 429, PROVIDER_NOT_CONFIGURED: 503,
-  PROVIDER_UNAVAILABLE: 502, PREPROCESS_FAILED: 422, NO_TABLE_DETECTED: 422, NOT_FOUND: 404, INVALID_STATE: 409,
+  PROVIDER_UNAVAILABLE: 502, PREPROCESS_FAILED: 422, NO_TABLE_DETECTED: 422, NO_NOTEBOOK_DETECTED: 422, NOT_FOUND: 404, INVALID_STATE: 409,
   INVALID_REQUEST: 400, REVISION_CONFLICT: 409, VALIDATION_ERRORS: 422, POINT_CONFLICTS: 409, CONFIRM_IN_PROGRESS: 409,
   IMPORT_FAILED: 500, IMAGE_EXPIRED: 404,
 };

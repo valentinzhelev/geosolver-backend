@@ -12,9 +12,13 @@ const int = (name, fallback) => {
 
 function getConfig() {
   return {
-    pipelineVersion: 'capture-2.2.0',
+    pipelineVersion: 'capture-2.3.0',
     reconstructionVersion: 'capture-reconstruct-1.0.0',
     validationVersion: 'capture-validate-2.2.0',
+    // V2.3: Field Notebook mode versions, tracked separately from the coordinate-table ones above (a job's mode
+    // decides which versions are meaningful; see models/CaptureJob.js).
+    notebookReconstructionVersion: 'capture-notebook-reconstruct-1.0.0',
+    notebookValidationVersion: 'capture-notebook-validate-1.0.0',
     maxBytes: int('CAPTURE_MAX_BYTES', 8 * 1024 * 1024),
     maxPixels: int('CAPTURE_MAX_PIXELS', 40 * 1000 * 1000), // decoded-size guard (pixel bomb protection)
     minSide: int('CAPTURE_MIN_SIDE', 200),

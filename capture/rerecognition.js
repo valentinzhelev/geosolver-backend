@@ -16,9 +16,15 @@ const { TRACKED_SEMANTICS } = require('./arbitration');
 const { hasSuspiciousSymbol } = require('./symbols');
 const { isCaptureError } = require('./errors');
 
+// Coordinate-table semantics (capture/arbitration.js's TRACKED_SEMANTICS) plus the Field Notebook ones
+// (capture/notebook/rerecognition fields: identifiers, angles, measurements) - re-recognition's OWN "is this worth
+// a crop budget" gate, independent of arbitration's tracked-semantics gate (which stays coordinate-table-only by
+// default; capture/notebook/validation.js opts individual fields in explicitly via arbitrateCell's `tracked`).
+const RERECOGNIZABLE_SEMANTICS = new Set([...TRACKED_SEMANTICS, 'target', 'angle', 'measurement']);
+
 /** Cells worth spending a re-recognition budget on: identifiers/numerics that look uncertain from the primary pass. */
 function needsRerecognition(cell, semantic, config) {
-  if (!TRACKED_SEMANTICS.has(semantic)) return false;
+  if (!RERECOGNIZABLE_SEMANTICS.has(semantic)) return false;
   if (!cell.rawText) return false; // nothing to re-read
   if (typeof cell.confidence !== 'number') return true;
   if (cell.confidence < config.confidenceThreshold) return true;
@@ -82,27 +88,24 @@ function candidateFromCropResult(recognized, { pass, variantKind }) {
 }
 
 /**
- * Re-recognizes uncertain cells of a reconstructed table, appending candidates in place (mutates `table`).
- * Bounded by config.maxCellsPerJob (across the whole table) and config.maxPassesPerCell (per cell).
- * @param {object} table reconstructed table (capture/reconstruct.js shape)
+ * Re-recognizes uncertain cells, appending candidates in place (mutates each cell). Mode-agnostic: it only needs a
+ * flat list of {cell, semantic} pairs, not any particular table/notebook shape - capture/jobService.js builds that
+ * list differently for a coordinate table (capture/reconstruct.js) vs a field notebook
+ * (capture/notebook/reconstruct.js), via `fieldsFromTable`/`fieldsFromNotebook` below.
+ * Bounded by config.maxCellsPerJob (across the whole job) and config.maxPassesPerCell (per cell).
+ * @param {{cell: object, semantic: string|null}[]} fields every candidate cell worth considering, with its semantic
  * @param {Buffer} reviewBuffer the review-size image the cell bboxes are expressed in
  * @param {{width:number, height:number}} reviewBounds
  * @param {object} provider an OCR provider (capture/providers)
  * @param {object} config `getConfig().rerecognition`
  * @returns {Promise<{cellsProcessed: number, passesRun: number}>}
  */
-async function rerecognizeUncertainCells(table, reviewBuffer, reviewBounds, provider, config) {
+async function rerecognizeUncertainCells(fields, reviewBuffer, reviewBounds, provider, config) {
   if (!config.enabled) return { cellsProcessed: 0, passesRun: 0 };
-  const semanticOf = (colIndex) => (table.columns.find((c) => c.index === colIndex) || {}).semantic || null;
-  const candidates = [];
-  for (const row of table.rows) {
-    if (row.excluded) continue;
-    for (const cell of row.cells) {
-      const semantic = semanticOf(cell.col);
-      if (needsRerecognition(cell, semantic, { confidenceThreshold: 0.85 })) candidates.push(cell);
-    }
-  }
-  const targets = candidates.slice(0, config.maxCellsPerJob);
+  const targets = fields
+    .filter(({ cell, semantic }) => needsRerecognition(cell, semantic, { confidenceThreshold: 0.85 }))
+    .map(({ cell }) => cell)
+    .slice(0, config.maxCellsPerJob);
   let passesRun = 0;
   for (const cell of targets) {
     const rect = cropRect(cell.bbox, config.cropPaddingPx, reviewBounds);
@@ -128,4 +131,38 @@ async function rerecognizeUncertainCells(table, reviewBuffer, reviewBounds, prov
   return { cellsProcessed: targets.length, passesRun };
 }
 
-module.exports = { needsRerecognition, cropRect, buildVariants, rerecognizeUncertainCells };
+/** Flattens a coordinate-table's cells into {cell, semantic} pairs (excluded rows are skipped). */
+function fieldsFromTable(table) {
+  const semanticOf = (colIndex) => (table.columns.find((c) => c.index === colIndex) || {}).semantic || null;
+  const out = [];
+  for (const row of table.rows) {
+    if (row.excluded) continue;
+    for (const cell of row.cells) out.push({ cell, semantic: semanticOf(cell.col) });
+  }
+  return out;
+}
+
+/** Flattens a Field Notebook's fields (station/orientation/observations across every setup) into {cell, semantic} pairs. */
+function fieldsFromNotebook(notebook) {
+  const out = [];
+  for (const setup of notebook.setups) {
+    out.push({ cell: setup.station.point, semantic: 'target' });
+    out.push({ cell: setup.station.instrumentHeight, semantic: 'measurement' });
+    if (setup.orientation) {
+      out.push({ cell: setup.orientation.target, semantic: 'target' });
+      if (setup.orientation.direction) out.push({ cell: setup.orientation.direction, semantic: 'angle' });
+    }
+    for (const row of setup.observations) {
+      if (row.excluded) continue;
+      for (const col of row.cols) {
+        if (!col.field) continue;
+        const cell = row.cells[row.cols.indexOf(col)];
+        const semantic = col.field === 'hz' || col.field === 'vz' ? 'angle' : ['distance', 'horizontalDistance', 'prismHeight'].includes(col.field) ? 'measurement' : 'target';
+        out.push({ cell, semantic });
+      }
+    }
+  }
+  return out;
+}
+
+module.exports = { needsRerecognition, cropRect, buildVariants, rerecognizeUncertainCells, fieldsFromTable, fieldsFromNotebook };

@@ -13,7 +13,7 @@
  */
 const { inspectImage, preprocessImage } = require('../preprocess');
 const { reconstructTable } = require('../reconstruct');
-const { rerecognizeUncertainCells } = require('../rerecognition');
+const { rerecognizeUncertainCells, fieldsFromTable } = require('../rerecognition');
 const { evaluateTable, cellReviewState } = require('../validation');
 const { getConfig } = require('../config');
 
@@ -79,7 +79,7 @@ async function evaluateDocument(input) {
   }
   report.tableDetected = true;
 
-  await rerecognizeUncertainCells(table, pre.review.buffer, { width: pre.review.width, height: pre.review.height }, provider, config.rerecognition);
+  await rerecognizeUncertainCells(fieldsFromTable(table), pre.review.buffer, { width: pre.review.width, height: pre.review.height }, provider, config.rerecognition);
   const evaluated = evaluateTable(table, { crs: input.crs || null, confidenceThreshold: config.confidenceThreshold, arbitration: config.arbitration });
   const dataRows = evaluated.table.rows.filter((r) => !r.skipped && !r.excluded);
   report.reconstructedRows = dataRows.length;

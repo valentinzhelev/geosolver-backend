@@ -1,12 +1,14 @@
 /**
- * Capture V2.1 API (coordinate tables).
+ * Capture API - two modes: coordinate-table (V2.1/V2.2) and field-notebook (V2.3, POST body `mode`).
  *
- *   POST   /api/capture/jobs                 upload an image for a project -> OCR -> reconstructed draft table
+ *   POST   /api/capture/jobs                 upload an image for a project -> OCR -> reconstructed draft
  *   GET    /api/capture/jobs?projectId=...   Capture history for a project (summaries only, newest first)
- *   GET    /api/capture/jobs/:id             the job (table, cell states, summary)
+ *   GET    /api/capture/jobs/:id             the job (table or notebook, cell states, summary)
  *   GET    /api/capture/jobs/:id/image/:kind review | thumbnail image (authenticated)
- *   PATCH  /api/capture/jobs/:id/cells       review corrections and column mapping (rawText is never changed)
- *   POST   /api/capture/jobs/:id/confirm     explicit, re-validated, idempotent import into SurveyPoints
+ *   PATCH  /api/capture/jobs/:id/cells       review corrections and column/field mapping (rawText never changes)
+ *   POST   /api/capture/jobs/:id/confirm     explicit, re-validated, idempotent confirmation:
+ *                                             coordinate-table -> SurveyPoints; field-notebook -> a
+ *                                             FieldObservationSet (never SurveyPoints, never a calculation)
  *
  * Every route: authentication + Pro gate + project authorization (editor or above, re-checked on every call).
  * Errors are fixed sanitized messages (capture/errors.js); provider messages, OCR text and file content never leave.
@@ -22,8 +24,12 @@ const { getConfig } = require('../capture/config');
 const { CaptureError, isCaptureError } = require('../capture/errors');
 const { createJob, processJob, applyReviewEdits, publicJob, listJobs } = require('../capture/jobService');
 const { confirmJob } = require('../capture/importService');
+const { applyNotebookReviewEdits } = require('../capture/notebook/jobService');
+const { confirmNotebookJob } = require('../capture/notebook/importService');
 const { assertWithinQuota } = require('../capture/quota');
 const { getStorage } = require('../capture/storage');
+
+const VALID_MODES = ['coordinate-table', 'field-notebook'];
 
 const router = express.Router();
 router.use(auth, requireActiveSubscription);
@@ -64,12 +70,13 @@ router.post('/jobs', (req, res, next) => {
 }, wrap(async (req, res) => {
   const projectId = req.body && req.body.projectId;
   if (!projectId || !mongoose.isValidObjectId(projectId)) throw new CaptureError('PROJECT_REQUIRED');
-  if (req.body.mode !== undefined && req.body.mode !== 'coordinate-table') throw new CaptureError('INVALID_REQUEST');
+  const mode = req.body.mode === undefined ? 'coordinate-table' : req.body.mode;
+  if (!VALID_MODES.includes(mode)) throw new CaptureError('INVALID_REQUEST');
   const ctx = await requireProjectEditor(req.userId, projectId); // no project access -> no CaptureJob
   if (!req.file || !req.file.buffer || req.file.buffer.length === 0) throw new CaptureError('NO_FILE');
   await assertWithinQuota(req.userId, config.monthlyQuota);
 
-  const job = await createJob({ userId: req.userId, projectId, buffer: req.file.buffer, originalName: req.file.originalname });
+  const job = await createJob({ userId: req.userId, projectId, buffer: req.file.buffer, originalName: req.file.originalname, mode });
   await processJob(job, ctx);
   if (job.status === 'failed') return fail(res, new CaptureError(job.failure.code), String(job._id));
   return res.status(201).json({ success: true, data: publicJob(job) });
@@ -102,12 +109,17 @@ router.get('/jobs/:id/image/:kind', wrap(async (req, res) => {
 
 router.patch('/jobs/:id/cells', express.json({ limit: '256kb' }), wrap(async (req, res) => {
   const { job, ctx } = await loadOwnedJob(req);
-  await applyReviewEdits(job, req.body || {}, ctx);
+  if (job.mode === 'field-notebook') await applyNotebookReviewEdits(job, req.body || {}, config);
+  else await applyReviewEdits(job, req.body || {}, ctx);
   res.json({ success: true, data: publicJob(job) });
 }));
 
 router.post('/jobs/:id/confirm', wrap(async (req, res) => {
   const { job, ctx } = await loadOwnedJob(req); // the body is ignored: the server never trusts a client-supplied table
+  if (job.mode === 'field-notebook') {
+    const result = await confirmNotebookJob(job);
+    return res.json({ success: true, alreadyConfirmed: result.alreadyConfirmed, observationSetId: result.observationSetId, data: publicJob(result.job) });
+  }
   const result = await confirmJob(job, ctx);
   res.json({ success: true, alreadyConfirmed: result.alreadyConfirmed, importedCount: result.pointIds.length, pointIds: result.pointIds, data: publicJob(result.job) });
 }));

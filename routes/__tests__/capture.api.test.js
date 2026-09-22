@@ -147,7 +147,7 @@ describe('creating a job produces a DRAFT only', () => {
     const res = await upload();
     expect(res.status).toBe(201);
     const job = res.body.data;
-    expect(job).toMatchObject({ status: 'needs_review', mode: 'coordinate-table', revision: 0, project: H.PROJECT, pipelineVersion: 'capture-2.2.0' });
+    expect(job).toMatchObject({ status: 'needs_review', mode: 'coordinate-table', revision: 0, project: H.PROJECT, pipelineVersion: 'capture-2.3.0' });
     expect(job.arbitrationVersion).toBe('capture-arb-1.0.0');
     expect(job.provider).toMatchObject({ name: 'fixture', wordCount: expect.any(Number) });
     expect(job.table.columns.map((c) => c.semantic)).toEqual(['point', 'code', 'x', 'y', 'h', 'notes']);

@@ -63,7 +63,10 @@ async function makeCapture(headers, rows, opts = {}) {
   return { layout, image };
 }
 
-const upload = (app, image, { projectId = PROJECT, id = OWNER, filename = 'table.png' } = {}) =>
-  request(app).post('/api/capture/jobs').set('Authorization', `Bearer ${token(id)}`).field('projectId', projectId).attach('image', image, filename);
+const upload = (app, image, { projectId = PROJECT, id = OWNER, filename = 'table.png', mode } = {}) => {
+  let req = request(app).post('/api/capture/jobs').set('Authorization', `Bearer ${token(id)}`).field('projectId', projectId);
+  if (mode) req = req.field('mode', mode);
+  return req.attach('image', image, filename);
+};
 
 module.exports = { OWNER, OTHER, PROJECT, OTHER_PROJECT, SHARED_PROJECT, token, authed, configureAccess, fixtureProvider, makeCapture, upload };

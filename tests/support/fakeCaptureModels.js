@@ -139,6 +139,31 @@ const SurveyPoint = {
   __failNextInsertAfter: undefined,
 };
 
+/* ------------------------------------------------------------- FieldObservationSet (V2.3) */
+const observationSetStore = makeStore('FieldObservationSet');
+
+const FieldObservationSet = {
+  async create(data) {
+    const key = String(data.source.captureJobId);
+    if ([...observationSetStore.rows.values()].some((d) => String(d.source.captureJobId) === key)) {
+      const err = new Error('E11000 duplicate key error');
+      err.code = 11000;
+      throw err;
+    }
+    const now = new Date();
+    const snap = clone({ ...data, _id: newId(), user: String(data.user), projectId: String(data.projectId), source: { ...data.source, captureJobId: String(data.source.captureJobId) }, confirmedAt: data.confirmedAt || now, createdAt: now, updatedAt: now });
+    observationSetStore.rows.set(snap._id, snap);
+    return clone(snap);
+  },
+  async findOne(filter) {
+    const found = [...observationSetStore.rows.values()].find((d) => matches(d, filter));
+    return found ? clone(found) : null;
+  },
+  find(filter = {}) { return query(() => [...observationSetStore.rows.values()].filter((d) => matches(d, filter))); },
+  __reset() { observationSetStore.rows.clear(); },
+  __all() { return [...observationSetStore.rows.values()].map(clone); },
+};
+
 /* -------------------------------------------------------------------- Storage */
 function createMemoryStorage() {
   const rows = new Map();
@@ -151,4 +176,4 @@ function createMemoryStorage() {
   };
 }
 
-module.exports = { CaptureJob, SurveyPoint, createMemoryStorage, newId };
+module.exports = { CaptureJob, SurveyPoint, FieldObservationSet, createMemoryStorage, newId };

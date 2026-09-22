@@ -17,12 +17,16 @@ describe('CaptureJob schema', () => {
     expect(job.confirmClaimedAt).toBeNull();
   });
 
-  it('supports the required statuses and rejects unknown ones and unsupported modes', () => {
+  it('supports the required statuses/modes and rejects unknown ones', () => {
     expect(CaptureJob.STATUSES).toEqual(['uploaded', 'processing', 'needs_review', 'confirmed', 'failed']);
-    const bad = new CaptureJob({ user: oid(), project: oid(), pipelineVersion: 'v', status: 'done', mode: 'field-notebook' });
+    const bad = new CaptureJob({ user: oid(), project: oid(), pipelineVersion: 'v', status: 'done', mode: 'nonsense-mode' });
     const err = bad.validateSync();
     expect(err.errors.status).toBeDefined();
     expect(err.errors.mode).toBeDefined();
+    // V2.3 adds 'field-notebook' alongside the original 'coordinate-table' - both are valid
+    const ok = new CaptureJob({ user: oid(), project: oid(), pipelineVersion: 'v', mode: 'field-notebook' });
+    const okErr = ok.validateSync();
+    expect(okErr === undefined || okErr.errors.mode === undefined).toBe(true);
   });
 
   it('a project and a user are mandatory (no project -> no CaptureJob)', () => {
