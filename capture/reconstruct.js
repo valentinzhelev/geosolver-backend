@@ -13,6 +13,45 @@
 const { mapHeader, headerHits } = require('./headers');
 const { analyzeCellSymbols } = require('./symbols');
 
+/**
+ * Builds one "candidate cell" (the shape every capture mode shares - table cells and field-notebook fields alike)
+ * from the OCR words assigned to it. `candidates[0]` is always the PRIMARY (whole-page) reading; capture/
+ * rerecognition.js appends further passes and capture/arbitration.js judges trust from the whole pool - neither
+ * cares whether the cell came from a coordinate table or a field notebook.
+ * @param {object[]} ws the words for this cell, in reading order (already sorted)
+ * @param {{col: number, page: number, providerName: string|null, emptyBbox: object}} options `emptyBbox` is used
+ *   only when `ws` is empty, to keep a (synthetic) source region for an otherwise blank field.
+ */
+function buildCandidateCell(ws, { col, page, providerName, emptyBbox }) {
+  if (!ws.length) {
+    return {
+      col, rawText: '', confidence: null, page,
+      bbox: { ...emptyBbox, synthetic: true },
+      words: [], symbolConfidence: { min: null, suspicious: [] }, candidates: [], arbitration: null,
+      source: { provider: providerName }, userValue: null,
+    };
+  }
+  const confs = ws.map((w) => w.confidence).filter((v) => typeof v === 'number');
+  const rawText = ws.map((w) => w.text).join(' ');
+  const confidence = confs.length === ws.length ? Math.min(...confs) : null;
+  const words = ws.map((w) => ({ text: w.text, confidence: typeof w.confidence === 'number' ? w.confidence : null, bbox: w.bbox, symbols: Array.isArray(w.symbols) ? w.symbols : undefined }));
+  const symbolConfidence = analyzeCellSymbols(words);
+  const bbox = union(ws.map((w) => w.bbox));
+  return {
+    col,
+    rawText,
+    confidence,
+    page,
+    bbox,
+    words,
+    symbolConfidence,
+    candidates: [{ text: rawText, normalizedValue: null, provider: providerName, providerVersion: null, recognitionPass: 0, preprocessingVariant: 'primary', confidence, bbox, symbolConfidence, source: 'primary' }],
+    arbitration: null,
+    source: { provider: providerName },
+    userValue: null,
+  };
+}
+
 const median = (values) => {
   const s = [...values].sort((a, b) => a - b);
   if (!s.length) return 0;
@@ -198,33 +237,7 @@ function reconstructTable(page, options = {}) {
     }
     const cells = cols.map((c) => {
       const ws = cellWords.get(c.index).sort((a, b) => a.bbox.x - b.bbox.x);
-      if (!ws.length) {
-        return {
-          col: c.index, rawText: '', confidence: null, page: page.index,
-          bbox: { x: c.x0, y: line.bbox.y, w: c.x1 - c.x0, h: line.bbox.h, synthetic: true },
-          words: [], symbolConfidence: { min: null, suspicious: [] }, candidates: [], arbitration: null,
-          source: { provider: providerName }, userValue: null,
-        };
-      }
-      const confs = ws.map((w) => w.confidence).filter((v) => typeof v === 'number');
-      const rawText = ws.map((w) => w.text).join(' ');
-      const confidence = confs.length === ws.length ? Math.min(...confs) : null;
-      const words = ws.map((w) => ({ text: w.text, confidence: typeof w.confidence === 'number' ? w.confidence : null, bbox: w.bbox, symbols: Array.isArray(w.symbols) ? w.symbols : undefined }));
-      const symbolConfidence = analyzeCellSymbols(words);
-      return {
-        col: c.index,
-        rawText,
-        confidence,
-        page: page.index,
-        bbox: union(ws.map((w) => w.bbox)),
-        words,
-        symbolConfidence,
-        // candidates[0] is always the PRIMARY (whole-page) reading; capture/rerecognition.js appends further passes.
-        candidates: [{ text: rawText, normalizedValue: null, provider: providerName, providerVersion: null, recognitionPass: 0, preprocessingVariant: 'primary', confidence, bbox: union(ws.map((w) => w.bbox)), symbolConfidence, source: 'primary' }],
-        arbitration: null,
-        source: { provider: providerName },
-        userValue: null,
-      };
+      return buildCandidateCell(ws, { col: c.index, page: page.index, providerName, emptyBbox: { x: c.x0, y: line.bbox.y, w: c.x1 - c.x0, h: line.bbox.h } });
     });
     rows.push({ index: rows.length, bbox: line.bbox, cells });
   }
@@ -245,4 +258,4 @@ function reconstructTable(page, options = {}) {
   return { table, diagnostics: { medianHeight: medianH, lines: lines.length, headerLine: headerIdx, columns: cols.length, rows: rows.length } };
 }
 
-module.exports = { reconstructTable, median, union };
+module.exports = { reconstructTable, median, union, clusterLines, columnIntervals, nearestColumn, buildCandidateCell };

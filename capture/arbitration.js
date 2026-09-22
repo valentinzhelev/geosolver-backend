@@ -58,13 +58,19 @@ function alternativesFrom(scoredGroups, primaryKey) {
  */
 function arbitrateCell(cell, options = {}) {
   const semantic = options.semantic;
-  if (!TRACKED_SEMANTICS.has(semantic)) return null;
+  // `tracked`/`parseValue` let a caller outside the coordinate-table semantics (e.g. capture/notebook/validation.js,
+  // for angle/measurement fields) reuse this exact decision logic with its own value-comparison function, without
+  // touching the coordinate-table default behaviour at all when they are not passed.
+  const tracked = options.tracked !== undefined ? options.tracked : TRACKED_SEMANTICS.has(semantic);
+  if (!tracked) return null;
   const candidates = Array.isArray(cell.candidates) ? cell.candidates : [];
   if (!candidates.length) return null;
   const cfg = { ...DEFAULT_THRESHOLDS, ...options };
   const numericStyle = NUMERIC_SEMANTICS.has(semantic) ? options.numericStyle || null : null;
+  const parseValue = options.parseValue || normalizeCandidateValue;
+  const numericLike = options.numericLike !== undefined ? options.numericLike : NUMERIC_SEMANTICS.has(semantic);
 
-  const enriched = candidates.map((c) => ({ ...c, _norm: normalizeCandidateValue(c, semantic, numericStyle), _suspicious: hasSuspiciousSymbol(c.symbolConfidence) }));
+  const enriched = candidates.map((c) => ({ ...c, _norm: parseValue(c, semantic, numericStyle), _suspicious: hasSuspiciousSymbol(c.symbolConfidence) }));
   const primary = enriched.find((c) => c.recognitionPass === 0 && c.source === 'primary') || enriched[0];
   const real = enriched.filter((c) => c.source !== 'generated-alternative');
 
@@ -84,10 +90,10 @@ function arbitrateCell(cell, options = {}) {
   // ACCEPTED: it is an inferred possibility, not a corrected value.
   if (primary._norm.status !== 'ok') {
     const generated = generateLetterDigitAlternatives(primary.text)
-      .map((text) => ({ text, source: 'generated-alternative', _norm: normalizeCandidateValue({ text }, semantic, numericStyle) }))
+      .map((text) => ({ text, source: 'generated-alternative', _norm: parseValue({ text }, semantic, numericStyle) }))
       .filter((g) => g._norm.status === 'ok');
     if (generated.length) {
-      const digitDiff = NUMERIC_SEMANTICS.has(semantic) ? compareDigitStrings(String(primary.text).replace(/[^0-9]/g, ''), String(generated[0].text).replace(/[^0-9]/g, '')) : null;
+      const digitDiff = numericLike ? compareDigitStrings(String(primary.text).replace(/[^0-9]/g, ''), String(generated[0].text).replace(/[^0-9]/g, '')) : null;
       return {
         outcome: 'REVIEW_SUGGESTED',
         reason: 'GENERATED_ALTERNATIVE_FROM_LOOKALIKE',

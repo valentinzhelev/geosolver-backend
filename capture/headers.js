@@ -67,4 +67,4 @@ function headerHits(words) {
   return { hits, semantics: [...found] };
 }
 
-module.exports = { SEMANTIC_TYPES, SYNONYMS, normalizeHeader, mapHeader, headerHits };
+module.exports = { SEMANTIC_TYPES, SYNONYMS, normalizeHeader, mapHeader, headerHits, fold, LOOKALIKES };
