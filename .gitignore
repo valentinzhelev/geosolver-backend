@@ -1,2 +1,6 @@
 node_modules/
 .env
+
+# Capture V2.2 evaluation: real, potentially private labelled samples are opt-in only and never auto-committed.
+# See capture/evaluation/fixtures/manifest.schema.json and capture/evaluation/fixtures/realSamples.js.
+capture/evaluation/fixtures/real/

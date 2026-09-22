@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Capture evaluation sample manifest",
+  "description": "Describes a directory of REAL, labelled sample images for capture/evaluation/harness.js (capture/evaluation/fixtures/realSamples.js loads it). This directory is opt-in and gitignored (capture/evaluation/fixtures/real/): nothing here is committed automatically, because sample images can be private. Synthetic fixtures (tests/support/captureFixtures.js) are separate and always clearly labelled synthetic in their own metadata.",
+  "type": "object",
+  "required": ["samples"],
+  "properties": {
+    "samples": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["image", "groundTruth"],
+        "properties": {
+          "image": { "type": "string", "description": "Path to the sample image, relative to this manifest file." },
+          "crs": { "type": "string", "description": "Optional project CRS code to validate plausibility against, e.g. EPSG:7801." },
+          "metadata": {
+            "type": "object",
+            "description": "Describes the sample so aggregate reports can be sliced (e.g. handwriting accuracy only).",
+            "properties": {
+              "source": { "enum": ["synthetic", "real"] },
+              "handwriting": { "enum": ["printed", "handwritten", "mixed"] },
+              "capture": { "enum": ["scan", "phone-photo"] },
+              "lighting": { "enum": ["good", "poor"] },
+              "orientation": { "enum": ["upright", "rotated", "skewed"] },
+              "notes": { "type": "string" }
+            }
+          },
+          "groundTruth": {
+            "type": "object",
+            "required": ["rows"],
+            "properties": {
+              "rows": {
+                "type": "array",
+                "description": "One entry per table row, in the order it is printed. Only the fields present are checked (see capture/evaluation/harness.js valueMatches).",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "point": { "type": "string" },
+                    "code": { "type": "string" },
+                    "x": { "type": ["number", "null"] },
+                    "y": { "type": ["number", "null"] },
+                    "h": { "type": ["number", "null"] },
+                    "notes": { "type": "string" },
+                    "rawText": {
+                      "type": "object",
+                      "description": "Optional: expected OCR text per field, for exact-text accuracy (independent of the numeric value)."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

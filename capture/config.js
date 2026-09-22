@@ -12,7 +12,9 @@ const int = (name, fallback) => {
 
 function getConfig() {
   return {
-    pipelineVersion: 'capture-2.1.0',
+    pipelineVersion: 'capture-2.2.0',
+    reconstructionVersion: 'capture-reconstruct-1.0.0',
+    validationVersion: 'capture-validate-2.2.0',
     maxBytes: int('CAPTURE_MAX_BYTES', 8 * 1024 * 1024),
     maxPixels: int('CAPTURE_MAX_PIXELS', 40 * 1000 * 1000), // decoded-size guard (pixel bomb protection)
     minSide: int('CAPTURE_MIN_SIDE', 200),
@@ -25,6 +27,25 @@ function getConfig() {
     maxEditsPerRequest: 500,
     maxValueLength: 200,
     provider: process.env.CAPTURE_PROVIDER || 'google-vision',
+    // V2.2: candidate arbitration (capture/arbitration.js). Centralized and versioned; never hard-coded in the
+    // recognition/validation modules themselves.
+    arbitration: {
+      version: 'capture-arb-1.0.0',
+      minConsensus: int('CAPTURE_ARBITRATION_MIN_CONSENSUS', 2),
+      symbolConfidenceThreshold: 0.75,
+      acceptConfidenceThreshold: 0.85,
+      uncertainConfidenceFloor: 0.5,
+    },
+    // V2.2: bounded re-recognition of uncertain cells (capture/rerecognition.js). Costs a real provider call per
+    // variant, so every knob here is a hard cap, not a target.
+    rerecognition: {
+      enabled: process.env.CAPTURE_RERECOGNITION_DISABLED !== '1',
+      maxCellsPerJob: int('CAPTURE_RERECOGNITION_MAX_CELLS', 30),
+      maxPassesPerCell: int('CAPTURE_RERECOGNITION_MAX_PASSES', 3),
+      cropPaddingPx: int('CAPTURE_RERECOGNITION_PADDING', 12),
+      minCropSide: int('CAPTURE_RERECOGNITION_MIN_CROP_SIDE', 20),
+      enlargeFactor: 2, // used only by the 'enlarged' variant, itself only added when a crop is small
+    },
   };
 }
 

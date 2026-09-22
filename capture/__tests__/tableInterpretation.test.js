@@ -83,7 +83,7 @@ describe('row and column reconstruction', () => {
     expect(cell.words).toHaveLength(1);
     expect(cell.confidence).toBe(0.98);
     expect(cell.page).toBe(0);
-    expect(cell.candidates[0]).toMatchObject({ text: '4700000.25', source: 'fixture' });
+    expect(cell.candidates[0]).toMatchObject({ text: '4700000.25', provider: 'fixture', source: 'primary', recognitionPass: 0 });
   });
 
   it('multi-word cells (thousands separated by spaces) stay ONE cell', () => {
@@ -176,7 +176,9 @@ describe('deterministic validation (never changes a value)', () => {
   });
 
   it('low OCR confidence is a WARNING (review suggested), and a user correction counts as reviewed', () => {
-    const layoutOpts = { confidence: (r, c) => (r === 1 && c === 1 ? 0.4 : 0.99) };
+    // a single moderate-confidence reading (no re-recognition ran: this test calls evaluateTable directly): the
+    // V2.2 arbitration layer keeps this a warning, not a block (0.5 <= confidence < accept threshold).
+    const layoutOpts = { confidence: (r, c) => (r === 1 && c === 1 ? 0.7 : 0.99) };
     const { table: base } = build(['Point', 'X', 'Y'], [['1', '4700000', '500000'], ['2', '4700001', '500001']], layoutOpts);
     const first = evaluateTable(base);
     expect(issuesOf(first.table, 1, 'x')).toContain('LOW_CONFIDENCE');
@@ -188,6 +190,23 @@ describe('deterministic validation (never changes a value)', () => {
     const second = evaluateTable(corrected);
     expect(issuesOf(second.table, 1, 'x')).not.toContain('LOW_CONFIDENCE');
     expect(cellReviewState(second.table.rows[1].cells[1])).toBe('edited');
+  });
+
+  it('V2.2: a single VERY low-confidence reading (<0.5, no corroborating pass) is UNCERTAIN and BLOCKS confirmation until reviewed', () => {
+    const layoutOpts = { confidence: (r, c) => (r === 1 && c === 1 ? 0.2 : 0.99) };
+    const { table: base } = build(['Point', 'X', 'Y'], [['1', '4700000', '500000'], ['2', '4700001', '500001']], layoutOpts);
+    const first = evaluateTable(base);
+    expect(issuesOf(first.table, 1, 'x')).toContain('RECOGNITION_UNCERTAIN');
+    expect(first.table.rows[1].status).toBe('error');
+    expect(first.summary.canConfirm).toBe(false);
+    expect(first.table.rows[1].cells[1].arbitration).toMatchObject({ outcome: 'UNCERTAIN' });
+
+    // an explicit user correction resolves it, exactly like any other correction
+    const corrected = structuredClone(base);
+    corrected.rows[1].cells[1].userValue = '4700001';
+    const second = evaluateTable(corrected);
+    expect(issuesOf(second.table, 1, 'x')).not.toContain('RECOGNITION_UNCERTAIN');
+    expect(second.summary.canConfirm).toBe(true);
   });
 
   it('inconsistent decimal separators in one column are flagged (warning) on the minority cells', () => {

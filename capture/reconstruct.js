@@ -11,6 +11,7 @@
  */
 
 const { mapHeader, headerHits } = require('./headers');
+const { analyzeCellSymbols } = require('./symbols');
 
 const median = (values) => {
   const s = [...values].sort((a, b) => a - b);
@@ -201,20 +202,26 @@ function reconstructTable(page, options = {}) {
         return {
           col: c.index, rawText: '', confidence: null, page: page.index,
           bbox: { x: c.x0, y: line.bbox.y, w: c.x1 - c.x0, h: line.bbox.h, synthetic: true },
-          words: [], candidates: [], source: { provider: providerName }, userValue: null,
+          words: [], symbolConfidence: { min: null, suspicious: [] }, candidates: [], arbitration: null,
+          source: { provider: providerName }, userValue: null,
         };
       }
       const confs = ws.map((w) => w.confidence).filter((v) => typeof v === 'number');
       const rawText = ws.map((w) => w.text).join(' ');
       const confidence = confs.length === ws.length ? Math.min(...confs) : null;
+      const words = ws.map((w) => ({ text: w.text, confidence: typeof w.confidence === 'number' ? w.confidence : null, bbox: w.bbox, symbols: Array.isArray(w.symbols) ? w.symbols : undefined }));
+      const symbolConfidence = analyzeCellSymbols(words);
       return {
         col: c.index,
         rawText,
         confidence,
         page: page.index,
         bbox: union(ws.map((w) => w.bbox)),
-        words: ws.map((w) => ({ text: w.text, confidence: typeof w.confidence === 'number' ? w.confidence : null, bbox: w.bbox })),
-        candidates: [{ text: rawText, confidence, source: providerName }],
+        words,
+        symbolConfidence,
+        // candidates[0] is always the PRIMARY (whole-page) reading; capture/rerecognition.js appends further passes.
+        candidates: [{ text: rawText, normalizedValue: null, provider: providerName, providerVersion: null, recognitionPass: 0, preprocessingVariant: 'primary', confidence, bbox: union(ws.map((w) => w.bbox)), symbolConfidence, source: 'primary' }],
+        arbitration: null,
         source: { provider: providerName },
         userValue: null,
       };

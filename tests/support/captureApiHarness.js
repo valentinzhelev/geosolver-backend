@@ -27,14 +27,31 @@ function configureAccess({ User, FieldBookProject, Workspace }, { crs = 'EPSG:78
   Workspace.findById.mockImplementation(async () => ({ _id: 'ws1', owner: OTHER, members: [{ user: OWNER, role: 'viewer' }] }));
 }
 
-/** A deterministic OCR provider that "reads" exactly the words of a fixture layout. */
-function fixtureProvider(layout, { mutate } = {}) {
+/**
+ * A deterministic OCR provider that "reads" exactly the words of a fixture layout. Crop-aware (V2.2): a request
+ * carrying `dims.crop` (capture/rerecognition.js re-recognition passes) returns the TRUE words inside that crop
+ * rectangle, in crop-local coordinates, ignoring `mutate` - a focused re-read of the real pixels, not the
+ * injected whole-page misread. `mutateCrop` can override that for tests that want a misread crop too.
+ */
+function fixtureProvider(layout, { mutate, mutateCrop } = {}) {
   return {
     name: 'fixture',
     version: 'test',
     recognize: jest.fn(async (buffer, dims) => {
       let words = stripPrivate(layout.words);
-      if (mutate) words = mutate(words);
+      if (dims && dims.crop) {
+        const { x, y, w, h } = dims.crop;
+        words = words
+          .filter((word) => {
+            const cx = word.bbox.x + word.bbox.w / 2;
+            const cy = word.bbox.y + word.bbox.h / 2;
+            return cx >= x && cx <= x + w && cy >= y && cy <= y + h;
+          })
+          .map((word) => ({ ...word, bbox: { ...word.bbox, x: word.bbox.x - x, y: word.bbox.y - y } }));
+        if (mutateCrop) words = mutateCrop(words, dims.crop);
+      } else if (mutate) {
+        words = mutate(words);
+      }
       return { provider: { name: 'fixture', version: 'test' }, page: { index: 0, width: dims.width, height: dims.height, words } };
     }),
   };

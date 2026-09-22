@@ -53,7 +53,7 @@ async function confirmJob(job, { crs = null } = {}) {
 
   // 1. re-run the deterministic validation on the stored table
   const config = getConfig();
-  const evaluated = evaluateTable(job.table, { crs, confidenceThreshold: config.confidenceThreshold });
+  const evaluated = evaluateTable(job.table, { crs, confidenceThreshold: config.confidenceThreshold, arbitration: config.arbitration });
   if (!evaluated.summary.canConfirm) {
     throw new CaptureError('VALIDATION_ERRORS', {
       summary: evaluated.summary,

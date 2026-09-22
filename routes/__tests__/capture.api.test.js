@@ -147,7 +147,8 @@ describe('creating a job produces a DRAFT only', () => {
     const res = await upload();
     expect(res.status).toBe(201);
     const job = res.body.data;
-    expect(job).toMatchObject({ status: 'needs_review', mode: 'coordinate-table', revision: 0, project: H.PROJECT, pipelineVersion: 'capture-2.1.0' });
+    expect(job).toMatchObject({ status: 'needs_review', mode: 'coordinate-table', revision: 0, project: H.PROJECT, pipelineVersion: 'capture-2.2.0' });
+    expect(job.arbitrationVersion).toBe('capture-arb-1.0.0');
     expect(job.provider).toMatchObject({ name: 'fixture', wordCount: expect.any(Number) });
     expect(job.table.columns.map((c) => c.semantic)).toEqual(['point', 'code', 'x', 'y', 'h', 'notes']);
     expect(job.table.rows).toHaveLength(3);
@@ -161,7 +162,8 @@ describe('creating a job produces a DRAFT only', () => {
     const cell = (await upload()).body.data.table.rows[0].cells[2];
     expect(cell).toMatchObject({ rawText: '4700000.25', normalizedValue: 4700000.25, semanticType: 'x', confidence: 0.98, page: 0, userValue: null, reviewState: 'accepted' });
     expect(cell.bbox).toEqual(expect.objectContaining({ x: expect.any(Number), y: expect.any(Number), w: expect.any(Number), h: expect.any(Number) }));
-    expect(cell.candidates[0]).toMatchObject({ text: '4700000.25', source: 'fixture' });
+    expect(cell.candidates[0]).toMatchObject({ text: '4700000.25', provider: 'fixture', source: 'primary' });
+    expect(cell.arbitration).toMatchObject({ outcome: 'ACCEPTED' });
     expect(cell.validation).toEqual({ status: 'ok', issues: [] });
   });
 

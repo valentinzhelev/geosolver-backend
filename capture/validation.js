@@ -7,6 +7,7 @@
  */
 
 const { parseColumn } = require('./numeric');
+const { arbitrateCell, TRACKED_SEMANTICS } = require('./arbitration');
 
 const NUMERIC = ['x', 'y', 'h'];
 const REQUIRED = ['point', 'x', 'y'];
@@ -43,6 +44,11 @@ const MESSAGES = {
   DUPLICATE_COLUMN_MAPPING: 'Повече от една колона е зададена за едно и също поле.',
   COLUMN_UNRESOLVED: 'Значението на колона не е потвърдено.',
   NO_DATA_ROWS: 'Не са намерени редове с данни.',
+  // V2.2: candidate arbitration (capture/arbitration.js) - these judge the TRUSTWORTHINESS of the recognition,
+  // separately from whether the text happens to parse as a number.
+  RECOGNITION_UNCERTAIN: 'Разпознаването не е достатъчно сигурно - въведете стойността ръчно или изберете разчитане.',
+  RECOGNITION_INVALID: 'Разпознаването не изглежда надеждно - въведете стойността ръчно.',
+  RECOGNITION_REVIEW_SUGGESTED: 'Има разминаване между няколко разчитания на тази клетка - проверете стойността.',
 };
 
 const effectiveText = (cell) => (cell.userValue !== null && cell.userValue !== undefined ? String(cell.userValue) : cell.rawText || '');
@@ -102,11 +108,13 @@ function evaluateTable(table, options = {}) {
     if (own.decimalSep) ownSeps.add(own.decimalSep);
   }
   const documentStyle = ownSeps.size === 1 ? { decimalSep: [...ownSeps][0] } : null;
+  const columnStyles = {}; // colIndex -> the resolved numeric style, reused by candidate arbitration below
   for (const semantic of NUMERIC) {
     for (const colIndex of bySemantic[semantic] || []) {
       const cells = t.rows.map((r) => r.cells.find((c) => c.col === colIndex));
       const raws = rawsOf(colIndex);
-      const { parsed } = parseColumn(raws, documentStyle);
+      const { parsed, style } = parseColumn(raws, documentStyle);
+      columnStyles[colIndex] = style;
       cells.forEach((cell, i) => {
         if (!cell) return;
         const p = parsed[i];
@@ -115,10 +123,19 @@ function evaluateTable(table, options = {}) {
       });
     }
   }
+  const arbitrationOptions = { ...options.arbitration };
 
   // ---- per-row / per-cell rules ------------------------------------------------------------------------------
   const pointNames = new Map();
   for (const row of t.rows) {
+    // V2.2 row exclusion ("Не импортирай този ред"): an explicit, reversible user decision. An excluded row keeps
+    // its OCR evidence and is still shown, but never blocks confirmation and is never imported - no validation
+    // issues are raised for it at all.
+    if (row.excluded) {
+      row._skip = true;
+      row._excluded = true;
+      continue;
+    }
     const point = cellAt(row, 'point');
     const anyContent = row.cells.some((c) => c.semanticType && !isBlank(effectiveText(c)));
     row._skip = !anyContent;
@@ -160,6 +177,19 @@ function evaluateTable(table, options = {}) {
       if (!edited && typeof cell.confidence === 'number' && cell.confidence < threshold && !isBlank(cell.rawText)) {
         add(cell, issue('LOW_CONFIDENCE', 'warning', MESSAGES.LOW_CONFIDENCE, { confidence: cell.confidence }));
       }
+    }
+    // V2.2 candidate arbitration: judges the TRUST of the recognition (agreement between independent passes,
+    // symbol confidence), separately from whether the text parses. Never runs for an already-edited cell: the
+    // user's explicit correction IS the resolution.
+    for (const cell of row.cells) {
+      if (!cell.semanticType || !TRACKED_SEMANTICS.has(cell.semanticType)) continue;
+      const result = arbitrateCell(cell, { semantic: cell.semanticType, numericStyle: columnStyles[cell.col] || null, ...arbitrationOptions });
+      cell.arbitration = result;
+      const edited = cell.userValue !== null && cell.userValue !== undefined;
+      if (!result || edited) continue;
+      if (result.outcome === 'UNCERTAIN') add(cell, issue('RECOGNITION_UNCERTAIN', 'error', MESSAGES.RECOGNITION_UNCERTAIN, { reason: result.reason }));
+      else if (result.outcome === 'INVALID' && cell.validation.status !== 'error') add(cell, issue('RECOGNITION_INVALID', 'error', MESSAGES.RECOGNITION_INVALID, { reason: result.reason }));
+      else if (result.outcome === 'REVIEW_SUGGESTED') add(cell, issue('RECOGNITION_REVIEW_SUGGESTED', 'warning', MESSAGES.RECOGNITION_REVIEW_SUGGESTED, { reason: result.reason }));
     }
     // CRS-justified plausibility and possible X/Y swap (warnings only; never swaps anything)
     const xc = cellAt(row, 'x');
@@ -216,9 +246,10 @@ function evaluateTable(table, options = {}) {
   }
 
   // ---- summary + import-ready rows -----------------------------------------------------------------------------------
+  const excludedRows = t.rows.filter((r) => r._excluded);
   const dataRows = t.rows.filter((r) => !r._skip);
-  if (dataRows.length === 0) t.issues.push(issue('NO_DATA_ROWS', 'error', MESSAGES.NO_DATA_ROWS));
-  const summary = { rows: dataRows.length, ready: 0, review: 0, invalid: 0, errors: 0, warnings: 0, tableErrors: 0, tableWarnings: 0, canConfirm: false };
+  if (dataRows.length === 0 && excludedRows.length === 0) t.issues.push(issue('NO_DATA_ROWS', 'error', MESSAGES.NO_DATA_ROWS));
+  const summary = { rows: dataRows.length, ready: 0, review: 0, invalid: 0, excluded: excludedRows.length, errors: 0, warnings: 0, tableErrors: 0, tableWarnings: 0, canConfirm: false };
   for (const is of t.issues) {
     if (is.severity === 'error') summary.tableErrors += 1;
     else summary.tableWarnings += 1;
@@ -258,6 +289,9 @@ function evaluateTable(table, options = {}) {
   // strip transient fields
   for (const row of t.rows) {
     delete row._skip;
+    row.excluded = Boolean(row.excluded); // normalized, always present
+    if (row._excluded) row.status = 'excluded';
+    delete row._excluded;
     row.skipped = row.cells.every((c) => !c.semanticType || isBlank(effectiveText(c)));
     for (const cell of row.cells) delete cell._parse;
   }

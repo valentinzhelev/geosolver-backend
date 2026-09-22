@@ -18,6 +18,11 @@ const captureJobSchema = new mongoose.Schema(
     mode: { type: String, enum: ['coordinate-table'], default: 'coordinate-table' },
     status: { type: String, enum: STATUSES, default: 'uploaded', index: true },
     pipelineVersion: { type: String, required: true },
+    // V2.2: which version of each deterministic stage produced this job's table, so a V2.1 job (where these are
+    // absent) is never silently reinterpreted under V2.2 rules - it is simply read as-is (see capture/config.js).
+    recognitionVersion: { type: String },
+    arbitrationVersion: { type: String },
+    validationVersion: { type: String },
 
     source: {
       originalName: { type: String, default: '' }, // sanitized display label only; never used for storage
@@ -44,6 +49,7 @@ const captureJobSchema = new mongoose.Schema(
       requestedAt: { type: Date },
       durationMs: { type: Number },
       wordCount: { type: Number },
+      rerecognitionPasses: { type: Number }, // V2.2: extra provider calls spent re-reading uncertain cells
     },
 
     table: { type: mongoose.Schema.Types.Mixed, default: null },

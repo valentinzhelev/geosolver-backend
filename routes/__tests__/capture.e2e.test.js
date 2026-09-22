@@ -65,10 +65,11 @@ it('image -> upload -> OCR -> table -> validation -> user correction -> confirm 
   });
   setProviderForTests('google-vision', provider);
 
-  // 1. upload
+  // 1. upload. The whole-page pass reads P2's X wrong at low confidence, so V2.2 re-recognizes just that cell
+  // (3 bounded crop variants: original / enhanced / threshold) before arbitration judges trust.
   const res = await H.upload(app, capture.image);
   expect(res.status).toBe(201);
-  expect(provider.recognize).toHaveBeenCalledTimes(1);
+  expect(provider.recognize).toHaveBeenCalledTimes(4);
   const job = res.body.data;
   expect(job.status).toBe('needs_review');
   expect(SurveyPoint.__all()).toHaveLength(0); // still a draft
@@ -85,6 +86,10 @@ it('image -> upload -> OCR -> table -> validation -> user correction -> confirm 
   expect(p2x.rawText).toBe('4 7OO 100,50');
   expect(p2x.reviewState).toBe('invalid');
   expect(p2x.validation.issues.map((i) => i.code)).toContain('VALUE_INVALID');
+  // V2.2: the letter/digit look-alike (O -> 0) generates an explicit alternative reading, never a silent fix
+  expect(p2x.candidates.length).toBeGreaterThan(1); // primary + re-recognition crop passes
+  expect(p2x.arbitration).toMatchObject({ outcome: 'REVIEW_SUGGESTED' });
+  expect(p2x.arbitration.alternatives.some((a) => a.normalizedValue === 4700100.5)).toBe(true);
   // H uses three decimals with a comma ("100,125"): readable only through the document's decimal comma -> review suggested
   expect(job.table.rows[0].cells[4].validation.issues.map((i) => i.code)).toEqual(['FORMAT_INFERRED']);
   expect(job.table.rows[0].cells[4].normalizedValue).toBe(100.125);
