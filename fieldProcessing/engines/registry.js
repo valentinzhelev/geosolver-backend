@@ -9,6 +9,7 @@ const MODULES = [
   require('./tools/polarHorizontal'),
   require('./tools/polarHeightZenith'),
   require('./tools/polarHeightVertical'),
+  require('./tools/heightCombination'),
 ];
 
 const CURRENT_VERSION = Object.freeze({
@@ -16,6 +17,7 @@ const CURRENT_VERSION = Object.freeze({
   'polar-horizontal': 1,
   'polar-height-zenith': 1,
   'polar-height-vertical': 1,
+  'height-combination': 1,
 });
 
 const ENGINES = new Map();
