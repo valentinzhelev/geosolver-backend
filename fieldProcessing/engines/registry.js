@@ -10,6 +10,10 @@ const MODULES = [
   require('./tools/polarHeightZenith'),
   require('./tools/polarHeightVertical'),
   require('./tools/heightCombination'),
+  require('./tools/traverseDirection'),
+  require('./tools/traversePropagation'),
+  require('./tools/traverseClosure'),
+  require('./tools/traverseBowditch'),
 ];
 
 const CURRENT_VERSION = Object.freeze({
@@ -18,6 +22,10 @@ const CURRENT_VERSION = Object.freeze({
   'polar-height-zenith': 1,
   'polar-height-vertical': 1,
   'height-combination': 1,
+  'traverse-direction': 1,
+  'traverse-propagation': 1,
+  'traverse-closure': 1,
+  'traverse-bowditch': 1,
 });
 
 const ENGINES = new Map();
