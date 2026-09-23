@@ -100,6 +100,8 @@ async function seedFixtureProject() {
   return { job, fos, polarRun, traverseRun };
 }
 
+const ORIGINAL_GAI_V1_ENABLED = process.env.GAI_V1_ENABLED;
+
 beforeEach(() => {
   SurveyPoint.__reset();
   CaptureJob.__reset();
@@ -111,11 +113,13 @@ beforeEach(() => {
   GaiMessage.__reset();
   H.configureAccess({ User, FieldBookProject, Workspace });
   setProviderForTests('openai', fakeGaiProvider({ reply: 'Отговор от асистента.' }));
+  process.env.GAI_V1_ENABLED = 'true';
   jest.spyOn(console, 'error').mockImplementation(() => {});
 });
 afterEach(() => {
   jest.restoreAllMocks();
   setProviderForTests('openai', null);
+  process.env.GAI_V1_ENABLED = ORIGINAL_GAI_V1_ENABLED;
 });
 
 const post = (path, body) => H.authed(app, 'post', `/api/gai${path}`, H.OWNER).send(body);

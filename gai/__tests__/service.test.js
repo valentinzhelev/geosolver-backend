@@ -13,13 +13,14 @@ const FieldProcessingRun = require('../../models/FieldProcessingRun');
 const Report = require('../../models/Report');
 const Calculation = require('../../models/Calculation');
 const FieldBookProject = require('../../models/FieldBookProject');
-const { answerQuestion } = require('../service');
+const { answerQuestion, isGaiV1Enabled } = require('../service');
 const { setProviderForTests } = require('../provider');
 const { fakeGaiProvider } = require('../../tests/support/fakeGaiProvider');
 const { PROMPT_VERSION, SYSTEM_PROMPT } = require('../prompt/systemPrompt');
 
 const PROJECT = 'proj1';
 const USER = 'user1';
+const ORIGINAL_GAI_V1_ENABLED = process.env.GAI_V1_ENABLED;
 
 beforeEach(() => {
   SurveyPoint.__reset();
@@ -30,9 +31,13 @@ beforeEach(() => {
   Calculation.__reset();
   FieldBookProject.findById.mockImplementation(async (id) => (String(id) === PROJECT ? { _id: PROJECT, name: 'Обект Витоша', crs: null } : null));
   setProviderForTests('openai', null);
+  process.env.GAI_V1_ENABLED = 'true'; // exercised explicitly by the enabled/disabled describe block below
 });
 
-afterEach(() => setProviderForTests('openai', null));
+afterEach(() => {
+  setProviderForTests('openai', null);
+  process.env.GAI_V1_ENABLED = ORIGINAL_GAI_V1_ENABLED;
+});
 
 describe('gai/service answerQuestion', () => {
   it('never calls a live provider in tests - uses the injected fixture provider', async () => {
@@ -66,5 +71,46 @@ describe('gai/service answerQuestion', () => {
     const result = await answerQuestion({ projectId: PROJECT, userId: USER, question: 'Обобщи проекта' });
     expect(Array.isArray(result.evidence)).toBe(true);
     expect(result.evidence.some((e) => e.kind === 'project')).toBe(true);
+  });
+});
+
+describe('GAI_V1_ENABLED kill switch', () => {
+  it('isGaiV1Enabled() reflects the env var exactly (default OFF for anything but the literal string "true")', () => {
+    process.env.GAI_V1_ENABLED = 'true';
+    expect(isGaiV1Enabled()).toBe(true);
+    for (const v of [undefined, '', 'false', '1', 'TRUE', 'yes']) {
+      process.env.GAI_V1_ENABLED = v;
+      expect(isGaiV1Enabled()).toBe(false);
+    }
+  });
+
+  it('when disabled, answerQuestion rejects with a 503 GaiError and never touches the provider', async () => {
+    process.env.GAI_V1_ENABLED = 'false';
+    const provider = fakeGaiProvider();
+    setProviderForTests('openai', provider);
+
+    await expect(answerQuestion({ projectId: PROJECT, userId: USER, question: 'Обобщи проекта' }))
+      .rejects.toMatchObject({ name: 'GaiError', code: 'GAI_DISABLED', status: 503 });
+    expect(provider.complete).not.toHaveBeenCalled();
+  });
+
+  it('when the env var is simply unset, answerQuestion is disabled by default', async () => {
+    delete process.env.GAI_V1_ENABLED;
+    const provider = fakeGaiProvider();
+    setProviderForTests('openai', provider);
+
+    await expect(answerQuestion({ projectId: PROJECT, userId: USER, question: 'Обобщи проекта' }))
+      .rejects.toMatchObject({ code: 'GAI_DISABLED' });
+    expect(provider.complete).not.toHaveBeenCalled();
+  });
+
+  it('when enabled, answerQuestion calls the provider normally', async () => {
+    process.env.GAI_V1_ENABLED = 'true';
+    const provider = fakeGaiProvider({ reply: 'Отговор.' });
+    setProviderForTests('openai', provider);
+
+    const result = await answerQuestion({ projectId: PROJECT, userId: USER, question: 'Обобщи проекта' });
+    expect(result.text).toBe('Отговор.');
+    expect(provider.complete).toHaveBeenCalledTimes(1);
   });
 });
