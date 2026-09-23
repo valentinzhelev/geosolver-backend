@@ -15,9 +15,13 @@ const SHARED_PROJECT = '507f1f77bcf86cd799439ccc';
 const token = (id = OWNER, role = 'teacher') => jwt.sign({ id, role }, process.env.JWT_SECRET, { expiresIn: '15m' });
 const authed = (app, method, url, id = OWNER) => request(app)[method](url).set('Authorization', `Bearer ${token(id)}`);
 
+const DEFAULT_NAMES = { [OWNER]: 'Test Owner', [OTHER]: 'Test Other' };
+
 /** Configure the mocked User / project / workspace models. `plan` per user id; projects by id. */
-function configureAccess({ User, FieldBookProject, Workspace }, { crs = 'EPSG:7800', plans = { [OWNER]: 'pro', [OTHER]: 'pro' } } = {}) {
-  User.findById.mockImplementation((id) => ({ select: async () => (plans[String(id)] ? { plan: plans[String(id)], subscriptionStatus: 'free' } : null) }));
+function configureAccess({ User, FieldBookProject, Workspace }, { crs = 'EPSG:7800', plans = { [OWNER]: 'pro', [OTHER]: 'pro' }, names = DEFAULT_NAMES } = {}) {
+  User.findById.mockImplementation((id) => ({
+    select: async () => (plans[String(id)] ? { plan: plans[String(id)], subscriptionStatus: 'free', name: names[String(id)] || null, email: `${String(id)}@example.test` } : null),
+  }));
   const projects = {
     [PROJECT]: { _id: PROJECT, user: OWNER, workspace: null, crs },
     [OTHER_PROJECT]: { _id: OTHER_PROJECT, user: OTHER, workspace: null, crs },

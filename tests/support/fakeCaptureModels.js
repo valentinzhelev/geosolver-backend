@@ -231,6 +231,75 @@ const FieldProcessingRun = {
   __all() { return [...processingRunStore.rows.values()].map(clone); },
 };
 
+/* ------------------------------------------------------------------------- Report (V2.5) */
+const reportStore = makeStore('Report');
+
+function wrapReport(snapshot) {
+  const doc = clone(snapshot);
+  Object.defineProperties(doc, {
+    save: { enumerable: false, value: async function save() { const plain = plainOf(this); plain.updatedAt = new Date(); reportStore.rows.set(String(plain._id), clone(plain)); this.updatedAt = plain.updatedAt; return this; } },
+    toObject: { enumerable: false, value: function toObject() { return plainOf(this); } },
+  });
+  return doc;
+}
+
+const Report = {
+  async create(data) {
+    const now = new Date();
+    const snap = clone({ ...data, _id: data._id ? String(data._id) : newId(), createdAt: now, updatedAt: now });
+    snap.user = String(snap.user);
+    snap.projectId = String(snap.projectId);
+    snap.generatedBy = String(snap.generatedBy);
+    if (snap.sourceId) snap.sourceId = String(snap.sourceId);
+    reportStore.rows.set(snap._id, snap);
+    return wrapReport(snap);
+  },
+  async findById(id) { const s = reportStore.rows.get(String(id)); return s ? wrapReport(s) : null; },
+  find(filter = {}) {
+    let sortSpec = null;
+    let excludeModel = false;
+    const q = {
+      select(spec) { if (spec === '-model') excludeModel = true; return q; },
+      sort(spec) { sortSpec = spec; return q; },
+      then(resolve, reject) {
+        let arr = [...reportStore.rows.values()].filter((s) => matches(s, filter)).map((s) => wrapReport(excludeModel ? { ...s, model: undefined } : s));
+        if (sortSpec) {
+          const [key, dir] = Object.entries(sortSpec)[0];
+          arr.sort((a, b) => (a[key] > b[key] ? 1 : a[key] < b[key] ? -1 : 0) * dir);
+        }
+        return Promise.resolve(arr).then(resolve, reject);
+      },
+    };
+    return q;
+  },
+  __reset() { reportStore.rows.clear(); },
+  __all() { return [...reportStore.rows.values()].map(clone); },
+};
+
+/* --------------------------------------------------------------------- ReportAsset (V2.5) */
+const reportAssetStore = makeStore('ReportAsset');
+
+const ReportAsset = {
+  async create(data) {
+    const snap = clone({ ...data, _id: newId(), report: data.report ? String(data.report) : null, user: String(data.user) });
+    reportAssetStore.rows.set(snap._id, snap);
+    return clone(snap);
+  },
+  findById(id) {
+    const q = {
+      select() { return q; },
+      then(resolve, reject) {
+        const s = reportAssetStore.rows.get(String(id));
+        return Promise.resolve(s ? clone(s) : null).then(resolve, reject);
+      },
+    };
+    return q;
+  },
+  async deleteMany(filter) { for (const [id, a] of reportAssetStore.rows) if (matches(a, filter)) reportAssetStore.rows.delete(id); return {}; },
+  __reset() { reportAssetStore.rows.clear(); },
+  __all() { return [...reportAssetStore.rows.values()].map(clone); },
+};
+
 /* -------------------------------------------------------------------- Storage */
 function createMemoryStorage() {
   const rows = new Map();
@@ -243,4 +312,4 @@ function createMemoryStorage() {
   };
 }
 
-module.exports = { CaptureJob, SurveyPoint, FieldObservationSet, FieldProcessingRun, createMemoryStorage, newId };
+module.exports = { CaptureJob, SurveyPoint, FieldObservationSet, FieldProcessingRun, Report, ReportAsset, createMemoryStorage, newId };
