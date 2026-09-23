@@ -9,7 +9,20 @@ const cors = require("cors");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 
-const historyRoutes = require("./routes/history");
+// SECURITY: routes/history.js is intentionally NOT required/mounted.
+// It is unrelated legacy code (models/History.js: bare x1/y1/alpha/s/result
+// scratch documents, no user/project field at all) with a completely
+// unauthenticated POST (persists arbitrary req.body) and GET (returns the
+// last 20 documents to anyone). It is NOT the current Calculation History
+// system - that is routes/calculations.js + models/Calculation.js, backing
+// src/components/pages/Calculations/CalculationHistoryPage.js, which is
+// untouched by this change. The one frontend caller,
+// src/components/shared/historyService.js, is itself imported nowhere in
+// the frontend (dead code) - nothing depends on this route. The file
+// itself, models/History.js, and any existing database documents are left
+// untouched - this only removes the HTTP route. Restore by re-adding the
+// require above and the `app.use("/api/history", historyRoutes)` line
+// below (see routes/__tests__/history.unmounted.test.js).
 const authRoutes = require("./routes/auth");
 const contactRoute = require('./routes/contact');
 const userPreferencesRoutes = require('./routes/userPreferences');
@@ -125,7 +138,6 @@ app.use('/api/google-auth', authLimiter);
 app.use('/api/contact', authLimiter);
 app.use('/api', apiLimiter);
 
-app.use("/api/history", historyRoutes);
 app.use("/api/auth", authRoutes);
 app.use('/api/contact', contactRoute);
 app.use('/api/user-preferences', userPreferencesRoutes);
