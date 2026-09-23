@@ -6,6 +6,7 @@ jest.mock('../../models/FieldObservationSet', () => require('../../tests/support
 jest.mock('../../models/FieldProcessingRun', () => require('../../tests/support/fakeCaptureModels').FieldProcessingRun);
 jest.mock('../../models/Report', () => require('../../tests/support/fakeCaptureModels').Report);
 jest.mock('../../models/Calculation', () => require('../../tests/support/fakeCaptureModels').Calculation);
+jest.mock('../../models/FieldBook', () => require('../../tests/support/fakeCaptureModels').FieldBook);
 jest.mock('../../models/GaiConversation', () => require('../../tests/support/fakeCaptureModels').GaiConversation);
 jest.mock('../../models/GaiMessage', () => require('../../tests/support/fakeCaptureModels').GaiMessage);
 jest.mock('../../models/User');
@@ -26,6 +27,7 @@ const FieldObservationSet = require('../../models/FieldObservationSet');
 const FieldProcessingRun = require('../../models/FieldProcessingRun');
 const Report = require('../../models/Report');
 const Calculation = require('../../models/Calculation');
+const FieldBook = require('../../models/FieldBook');
 const GaiConversation = require('../../models/GaiConversation');
 const GaiMessage = require('../../models/GaiMessage');
 const H = require('../../tests/support/captureApiHarness');
@@ -43,6 +45,7 @@ beforeEach(() => {
   FieldProcessingRun.__reset();
   Report.__reset();
   Calculation.__reset();
+  FieldBook.__reset();
   GaiConversation.__reset();
   GaiMessage.__reset();
   H.configureAccess({ User, FieldBookProject, Workspace });

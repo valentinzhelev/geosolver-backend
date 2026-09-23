@@ -4,6 +4,7 @@ jest.mock('../../../models/FieldObservationSet', () => require('../../../tests/s
 jest.mock('../../../models/FieldProcessingRun', () => require('../../../tests/support/fakeCaptureModels').FieldProcessingRun);
 jest.mock('../../../models/Report', () => require('../../../tests/support/fakeCaptureModels').Report);
 jest.mock('../../../models/Calculation', () => require('../../../tests/support/fakeCaptureModels').Calculation);
+jest.mock('../../../models/FieldBook', () => require('../../../tests/support/fakeCaptureModels').FieldBook);
 jest.mock('../../../models/FieldBookProject');
 
 const SurveyPoint = require('../../../models/SurveyPoint');
@@ -12,6 +13,7 @@ const FieldObservationSet = require('../../../models/FieldObservationSet');
 const FieldProcessingRun = require('../../../models/FieldProcessingRun');
 const Report = require('../../../models/Report');
 const Calculation = require('../../../models/Calculation');
+const FieldBook = require('../../../models/FieldBook');
 const FieldBookProject = require('../../../models/FieldBookProject');
 
 const tools = require('../index');
@@ -27,6 +29,7 @@ beforeEach(() => {
   FieldProcessingRun.__reset();
   Report.__reset();
   Calculation.__reset();
+  FieldBook.__reset();
   FieldBookProject.findById.mockImplementation(async (id) => (String(id) === PROJECT ? { _id: PROJECT, name: 'Обект Витоша', crs: 'EPSG:7801' } : null));
 });
 
@@ -88,6 +91,16 @@ describe('getProjectSummary', () => {
     expect(summary.capture.total).toBe(2);
     expect(summary.capture.needsReview).toBe(1);
     expect(summary.processing.polarCount).toBe(1);
+    expect(summary.legacyFieldBooks).toEqual({ total: 0, active: 0, byType: {} });
+  });
+
+  it('distinguishes legacy Field Books from the Capture system - capture.total=0 does not mean legacyFieldBooks.total=0', async () => {
+    await FieldBook.create({ user: USER, project: PROJECT, name: 'Нивелачен карнет', type: 'leveling' });
+    await FieldBook.create({ user: USER, project: PROJECT, name: 'Координатен карнет', type: 'coordinate' });
+    await FieldBook.create({ user: USER, project: PROJECT, name: 'Архивиран карнет', type: 'leveling', archived: true });
+    const summary = await tools.getProjectSummary(PROJECT);
+    expect(summary.capture.total).toBe(0);
+    expect(summary.legacyFieldBooks).toEqual({ total: 3, active: 2, byType: { leveling: 1, coordinate: 1 } });
   });
 });
 

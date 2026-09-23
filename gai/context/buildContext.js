@@ -92,9 +92,29 @@ async function buildContext({ projectId, userId, question }) {
   return { intent, data, evidence: dedupeEvidence(evidence) };
 }
 
-/** Renders the compact evidence bundle as a fenced JSON block for the provider prompt - never prose the LLM could reinterpret loosely. */
-function formatContextForPrompt(context) {
-  return JSON.stringify(context.data, null, 2);
+/**
+ * V1.0.1 production fix: `data` carries raw Mongo ObjectId strings (point/run/report/... `id`/`*Id` fields) so the
+ * server can build `evidence` for source chips - but the LLM has no use for them (it already gets human-readable
+ * `label`/`name` fields alongside every id) and a live production answer echoed one back in prose. Strip every
+ * `id`/`_id`/`...Id` key before the data ever reaches the prompt; `context.evidence` (used for the API response's
+ * clickable chips) is built separately and is NEVER passed through this function, so chip navigation is unaffected.
+ */
+function stripInternalIds(value) {
+  if (Array.isArray(value)) return value.map(stripInternalIds);
+  if (value && typeof value === 'object' && !(value instanceof Date)) {
+    const out = {};
+    for (const [key, v] of Object.entries(value)) {
+      if (/^_?id$/i.test(key) || /Id$/.test(key)) continue;
+      out[key] = stripInternalIds(v);
+    }
+    return out;
+  }
+  return value;
 }
 
-module.exports = { buildContext, formatContextForPrompt };
+/** Renders the compact evidence bundle as a fenced JSON block for the provider prompt - never prose the LLM could reinterpret loosely. */
+function formatContextForPrompt(context) {
+  return JSON.stringify(stripInternalIds(context.data), null, 2);
+}
+
+module.exports = { buildContext, formatContextForPrompt, stripInternalIds };

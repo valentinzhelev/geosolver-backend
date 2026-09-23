@@ -382,6 +382,24 @@ const Calculation = {
   __all() { return [...calculationStore.rows.values()].map(clone); },
 };
 
+/* --------------------------------------------------------------------- FieldBook (legacy digital carnets) */
+const fieldBookStore = makeStore('FieldBook');
+
+const FieldBook = {
+  async create(data) {
+    const now = new Date();
+    const snap = clone({ archived: false, type: 'leveling', rows: [], calculationHistory: [], ...data, _id: newId(), createdAt: now, updatedAt: now });
+    snap.user = String(snap.user);
+    snap.project = String(snap.project);
+    fieldBookStore.rows.set(snap._id, snap);
+    return clone(snap);
+  },
+  find(filter = {}) { return query(() => [...fieldBookStore.rows.values()].filter((b) => matches(b, filter))); },
+  __seed(b) { const snap = clone({ _id: newId(), archived: false, type: 'leveling', ...b }); fieldBookStore.rows.set(snap._id, snap); return snap; },
+  __reset() { fieldBookStore.rows.clear(); },
+  __all() { return [...fieldBookStore.rows.values()].map(clone); },
+};
+
 /* --------------------------------------------------------------- GaiConversation/GaiMessage (GAI V1) */
 const conversationStore = makeStore('GaiConversation');
 
@@ -470,4 +488,4 @@ function createMemoryStorage() {
   };
 }
 
-module.exports = { CaptureJob, SurveyPoint, FieldObservationSet, FieldProcessingRun, Report, ReportAsset, Calculation, GaiConversation, GaiMessage, createMemoryStorage, newId };
+module.exports = { CaptureJob, SurveyPoint, FieldObservationSet, FieldProcessingRun, Report, ReportAsset, Calculation, FieldBook, GaiConversation, GaiMessage, createMemoryStorage, newId };

@@ -4,6 +4,7 @@ jest.mock('../../models/FieldObservationSet', () => require('../../tests/support
 jest.mock('../../models/FieldProcessingRun', () => require('../../tests/support/fakeCaptureModels').FieldProcessingRun);
 jest.mock('../../models/Report', () => require('../../tests/support/fakeCaptureModels').Report);
 jest.mock('../../models/Calculation', () => require('../../tests/support/fakeCaptureModels').Calculation);
+jest.mock('../../models/FieldBook', () => require('../../tests/support/fakeCaptureModels').FieldBook);
 jest.mock('../../models/FieldBookProject');
 
 const SurveyPoint = require('../../models/SurveyPoint');
@@ -12,6 +13,7 @@ const FieldObservationSet = require('../../models/FieldObservationSet');
 const FieldProcessingRun = require('../../models/FieldProcessingRun');
 const Report = require('../../models/Report');
 const Calculation = require('../../models/Calculation');
+const FieldBook = require('../../models/FieldBook');
 const FieldBookProject = require('../../models/FieldBookProject');
 const { answerQuestion, isGaiV1Enabled } = require('../service');
 const { setProviderForTests } = require('../provider');
@@ -29,6 +31,7 @@ beforeEach(() => {
   FieldProcessingRun.__reset();
   Report.__reset();
   Calculation.__reset();
+  FieldBook.__reset();
   FieldBookProject.findById.mockImplementation(async (id) => (String(id) === PROJECT ? { _id: PROJECT, name: 'Обект Витоша', crs: null } : null));
   setProviderForTests('openai', null);
   process.env.GAI_V1_ENABLED = 'true'; // exercised explicitly by the enabled/disabled describe block below
