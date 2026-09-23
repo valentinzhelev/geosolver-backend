@@ -382,6 +382,82 @@ const Calculation = {
   __all() { return [...calculationStore.rows.values()].map(clone); },
 };
 
+/* --------------------------------------------------------------- GaiConversation/GaiMessage (GAI V1) */
+const conversationStore = makeStore('GaiConversation');
+
+function wrapConversation(snapshot) {
+  const doc = clone(snapshot);
+  Object.defineProperties(doc, {
+    save: { enumerable: false, value: async function save() { const plain = plainOf(this); plain.updatedAt = new Date(); conversationStore.rows.set(String(plain._id), clone(plain)); this.updatedAt = plain.updatedAt; return this; } },
+    toObject: { enumerable: false, value: function toObject() { return plainOf(this); } },
+  });
+  return doc;
+}
+
+const GaiConversation = {
+  async create(data) {
+    const now = new Date();
+    const snap = clone({ title: null, ...data, _id: newId(), createdAt: now, updatedAt: now });
+    snap.user = String(snap.user);
+    snap.projectId = String(snap.projectId);
+    conversationStore.rows.set(snap._id, snap);
+    return wrapConversation(snap);
+  },
+  async findById(id) {
+    if (!/^[0-9a-fA-F]{24}$/.test(String(id))) return null;
+    const s = conversationStore.rows.get(String(id));
+    return s ? wrapConversation(s) : null;
+  },
+  find(filter = {}) {
+    let sortSpec = null;
+    const q = {
+      sort(spec) { sortSpec = spec; return q; },
+      then(resolve, reject) {
+        let arr = [...conversationStore.rows.values()].filter((s) => matches(s, filter)).map((s) => wrapConversation(s));
+        if (sortSpec) {
+          const [key, dir] = Object.entries(sortSpec)[0];
+          arr.sort((a, b) => (a[key] > b[key] ? 1 : a[key] < b[key] ? -1 : 0) * dir);
+        }
+        return Promise.resolve(arr).then(resolve, reject);
+      },
+    };
+    return q;
+  },
+  __reset() { conversationStore.rows.clear(); },
+  __all() { return [...conversationStore.rows.values()].map(clone); },
+};
+
+const messageStore = makeStore('GaiMessage');
+
+const GaiMessage = {
+  async create(data) {
+    const now = new Date();
+    const snap = clone({ evidence: [], model: null, promptVersion: null, ...data, _id: newId(), createdAt: now, updatedAt: now });
+    snap.conversationId = String(snap.conversationId);
+    snap.projectId = String(snap.projectId);
+    snap.user = String(snap.user);
+    messageStore.rows.set(snap._id, snap);
+    return clone(snap);
+  },
+  find(filter = {}) {
+    let sortSpec = null;
+    const q = {
+      sort(spec) { sortSpec = spec; return q; },
+      then(resolve, reject) {
+        let arr = [...messageStore.rows.values()].filter((s) => matches(s, filter));
+        if (sortSpec) {
+          const [key, dir] = Object.entries(sortSpec)[0];
+          arr.sort((a, b) => (a[key] > b[key] ? 1 : a[key] < b[key] ? -1 : 0) * dir);
+        }
+        return Promise.resolve(arr.map(clone)).then(resolve, reject);
+      },
+    };
+    return q;
+  },
+  __reset() { messageStore.rows.clear(); },
+  __all() { return [...messageStore.rows.values()].map(clone); },
+};
+
 /* -------------------------------------------------------------------- Storage */
 function createMemoryStorage() {
   const rows = new Map();
@@ -394,4 +470,4 @@ function createMemoryStorage() {
   };
 }
 
-module.exports = { CaptureJob, SurveyPoint, FieldObservationSet, FieldProcessingRun, Report, ReportAsset, Calculation, createMemoryStorage, newId };
+module.exports = { CaptureJob, SurveyPoint, FieldObservationSet, FieldProcessingRun, Report, ReportAsset, Calculation, GaiConversation, GaiMessage, createMemoryStorage, newId };
