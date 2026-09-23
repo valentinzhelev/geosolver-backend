@@ -62,6 +62,7 @@ const CaptureJob = {
     return wrapJob(snap);
   },
   async findById(id) { const s = jobStore.rows.get(String(id)); return s ? wrapJob(s) : null; },
+  async findOne(filter) { const s = [...jobStore.rows.values()].find((r) => matches(r, filter)); return s ? wrapJob(s) : null; },
   /** minimal chainable query: find(filter).sort({field:1|-1}).limit(n) - enough for capture/jobService.js#listJobs */
   find(filter = {}) {
     let sortSpec = null;
@@ -69,6 +70,8 @@ const CaptureJob = {
     const q = {
       sort(spec) { sortSpec = spec; return q; },
       limit(n) { limitN = n; return q; },
+      select() { return q; }, // no-op: fake docs are already "full" objects
+      lean() { return q; },
       then(resolve, reject) {
         let arr = [...jobStore.rows.values()].filter((s) => matches(s, filter)).map((s) => wrapJob(s));
         if (sortSpec) {
@@ -107,7 +110,17 @@ const CaptureJob = {
 const pointStore = makeStore('SurveyPoint');
 
 function query(rowsFn) {
-  const q = { select() { return q; }, lean() { return q; }, then(res, rej) { return Promise.resolve(rowsFn().map(clone)).then(res, rej); } };
+  let limitN = null;
+  const q = {
+    select() { return q; },
+    lean() { return q; },
+    limit(n) { limitN = n; return q; },
+    then(res, rej) {
+      let arr = rowsFn().map(clone);
+      if (limitN) arr = arr.slice(0, limitN);
+      return Promise.resolve(arr).then(res, rej);
+    },
+  };
   return q;
 }
 
@@ -120,6 +133,17 @@ function duplicateKeyOf(d) {
 
 const SurveyPoint = {
   find(filter = {}) { return query(() => [...pointStore.rows.values()].filter((p) => matches(p, filter))); },
+  findOne(filter = {}) {
+    const q = {
+      select() { return q; },
+      lean() { return q; },
+      then(res, rej) {
+        const p = [...pointStore.rows.values()].find((r) => matches(r, filter));
+        return Promise.resolve(p ? clone(p) : null).then(res, rej);
+      },
+    };
+    return q;
+  },
   async create(d) {
     const key = duplicateKeyOf(d);
     if (key && [...pointStore.rows.values()].some((p) => duplicateKeyOf(p) === key)) {
@@ -212,16 +236,22 @@ const FieldProcessingRun = {
     return wrapRun(snap);
   },
   async findById(id) { const s = processingRunStore.rows.get(String(id)); return s ? wrapRun(s) : null; },
+  async findOne(filter) { const s = [...processingRunStore.rows.values()].find((r) => matches(r, filter)); return s ? wrapRun(s) : null; },
   find(filter = {}) {
     let sortSpec = null;
+    let limitN = null;
     const q = {
       sort(spec) { sortSpec = spec; return q; },
+      limit(n) { limitN = n; return q; },
+      select() { return q; }, // no-op: fake docs are already "full" objects
+      lean() { return q; },
       then(resolve, reject) {
         let arr = [...processingRunStore.rows.values()].filter((s) => matches(s, filter)).map((s) => wrapRun(s));
         if (sortSpec) {
           const [key, dir] = Object.entries(sortSpec)[0];
           arr.sort((a, b) => (a[key] > b[key] ? 1 : a[key] < b[key] ? -1 : 0) * dir);
         }
+        if (limitN) arr = arr.slice(0, limitN);
         return Promise.resolve(arr).then(resolve, reject);
       },
     };
@@ -258,15 +288,19 @@ const Report = {
   find(filter = {}) {
     let sortSpec = null;
     let excludeModel = false;
+    let limitN = null;
     const q = {
       select(spec) { if (spec === '-model') excludeModel = true; return q; },
       sort(spec) { sortSpec = spec; return q; },
+      limit(n) { limitN = n; return q; },
+      lean() { return q; },
       then(resolve, reject) {
         let arr = [...reportStore.rows.values()].filter((s) => matches(s, filter)).map((s) => wrapReport(excludeModel ? { ...s, model: undefined } : s));
         if (sortSpec) {
           const [key, dir] = Object.entries(sortSpec)[0];
           arr.sort((a, b) => (a[key] > b[key] ? 1 : a[key] < b[key] ? -1 : 0) * dir);
         }
+        if (limitN) arr = arr.slice(0, limitN);
         return Promise.resolve(arr).then(resolve, reject);
       },
     };
@@ -300,6 +334,54 @@ const ReportAsset = {
   __all() { return [...reportAssetStore.rows.values()].map(clone); },
 };
 
+/* --------------------------------------------------------------------- Calculation (GAI V1) */
+const calculationStore = makeStore('Calculation');
+
+const Calculation = {
+  async create(data) {
+    const now = new Date();
+    const snap = clone({ ...data, _id: newId(), createdAt: now, updatedAt: now });
+    if (snap.projectId) snap.projectId = String(snap.projectId);
+    if (snap.userId) snap.userId = String(snap.userId);
+    calculationStore.rows.set(snap._id, snap);
+    return clone(snap);
+  },
+  find(filter = {}) {
+    let sortSpec = null;
+    let limitN = null;
+    const q = {
+      select() { return q; },
+      lean() { return q; },
+      sort(spec) { sortSpec = spec; return q; },
+      limit(n) { limitN = n; return q; },
+      then(resolve, reject) {
+        let arr = [...calculationStore.rows.values()].filter((s) => matches(s, filter));
+        if (sortSpec) {
+          const [key, dir] = Object.entries(sortSpec)[0];
+          arr.sort((a, b) => (a[key] > b[key] ? 1 : a[key] < b[key] ? -1 : 0) * dir);
+        }
+        if (limitN) arr = arr.slice(0, limitN);
+        return Promise.resolve(arr.map(clone)).then(resolve, reject);
+      },
+    };
+    return q;
+  },
+  findOne(filter) {
+    const q = {
+      select() { return q; },
+      then(resolve, reject) {
+        const s = [...calculationStore.rows.values()].find((r) => matches(r, filter));
+        return Promise.resolve(s ? clone(s) : null).then(resolve, reject);
+      },
+    };
+    return q;
+  },
+  async countDocuments(filter) { return [...calculationStore.rows.values()].filter((s) => matches(s, filter)).length; },
+  __seed(c) { const snap = clone({ _id: newId(), createdAt: new Date(), ...c }); calculationStore.rows.set(snap._id, snap); return snap; },
+  __reset() { calculationStore.rows.clear(); },
+  __all() { return [...calculationStore.rows.values()].map(clone); },
+};
+
 /* -------------------------------------------------------------------- Storage */
 function createMemoryStorage() {
   const rows = new Map();
@@ -312,4 +394,4 @@ function createMemoryStorage() {
   };
 }
 
-module.exports = { CaptureJob, SurveyPoint, FieldObservationSet, FieldProcessingRun, Report, ReportAsset, createMemoryStorage, newId };
+module.exports = { CaptureJob, SurveyPoint, FieldObservationSet, FieldProcessingRun, Report, ReportAsset, Calculation, createMemoryStorage, newId };
