@@ -1,13 +1,21 @@
 /**
  * The GAI context layer (V1 section 3/15): question -> deterministic intent -> a SMALL set of tool calls ->
- * compact structured evidence. Never fetches everything for every question - each branch below is gated by the
- * detected intent, and every list call already caps its own row count (see gai/tools/*).
+ * internal evidence `data` + machine-readable `evidence` refs. Never fetches everything for every question - each
+ * branch is gated by the detected intent, and every list call caps its own row count (see gai/tools/*).
+ *
+ * `data` is INTERNAL (tool-shaped, contains ids/codes) and is never sent to a provider as-is: the provider only ever
+ * sees gai/context/semanticContext.js's projection of it (formatContextForPrompt). `evidence` keeps real ids for
+ * the UI's source chips and carries product-language labels only.
  */
 const { detectIntent } = require('./intent');
+const { toSemanticContext, redactInternalIdentifiers } = require('./semanticContext');
 const {
   getProjectSummary, getSurveyPointByName, tracePointProvenance,
   listFieldData, listProcessingRuns, getProcessingRun, listReports, getCalculationHistory, extractProjectIssues,
 } = require('../tools');
+const T = require('../terminology');
+
+const FIELD_DATA_CHIP_CAP = 5;
 
 function dedupeEvidence(evidence) {
   const seen = new Set();
@@ -21,9 +29,16 @@ function dedupeEvidence(evidence) {
   return out;
 }
 
-/** @param {{projectId:string, userId:string, question:string}} args */
-async function buildContext({ projectId, userId, question }) {
-  const intent = detectIntent(question);
+function processingFilter(intent) {
+  if (intent.wantsOpenOnly) return 'open';
+  if (intent.wantsTraverse && !intent.wantsPolar) return 'traverse';
+  if (intent.wantsPolar && !intent.wantsTraverse) return 'polar';
+  return 'any';
+}
+
+/** @param {{projectId:string, userId:string, question:string, previousQuestion?:string}} args */
+async function buildContext({ projectId, userId, question, previousQuestion }) {
+  const intent = detectIntent(question, { previousQuestion });
   const evidence = [];
   const data = {};
 
@@ -36,17 +51,18 @@ async function buildContext({ projectId, userId, question }) {
     const res = await getSurveyPointByName(projectId, candidate);
     if (res.status === 'FOUND') {
       const prov = await tracePointProvenance(projectId, res.point.id);
-      points.push({ requested: candidate, status: 'FOUND', point: res.point, provenanceChain: prov.status === 'FOUND' ? prov.chain : null });
-      evidence.push({ kind: 'surveyPoint', id: res.point.id, label: res.point.name });
+      const entry = { requested: candidate, status: 'FOUND', point: res.point, provenanceChain: prov.status === 'FOUND' ? prov.chain : null, provenance: prov.status === 'FOUND' ? prov : null };
+      points.push(entry);
+      evidence.push({ kind: 'surveyPoint', id: res.point.id, label: T.pointLabel(res.point.name) });
       if (prov.status === 'FOUND') {
         for (const step of prov.chain) if (step.kind !== 'point' && step.id) evidence.push({ kind: step.kind, id: step.id, label: step.label });
       }
-      // if this point came from a processing run, include that run's own detail (its height-reason codes etc.)
+      // internal only: the full source run detail (the provider sees just the one relevant observation of it)
       if (res.point.source && res.point.source.kind === 'field-processing') {
         const runStep = (prov.chain || []).find((s) => s.kind === 'processingRun');
         if (runStep) {
           const runDetail = await getProcessingRun(projectId, runStep.id);
-          if (runDetail.status === 'FOUND') points[points.length - 1].sourceProcessingRun = runDetail;
+          if (runDetail.status === 'FOUND') entry.sourceProcessingRun = runDetail;
         }
       }
     } else if (res.status === 'AMBIGUOUS') {
@@ -59,31 +75,38 @@ async function buildContext({ projectId, userId, question }) {
 
   if (intent.wantsReview || intent.wantsFieldData) {
     data.fieldData = await listFieldData(projectId, userId);
-    for (const j of data.fieldData) evidence.push({ kind: 'captureJob', id: j.id, label: j.originalName || j.mode });
+    const relevant = intent.wantsReview ? data.fieldData.filter((j) => j.status === 'needs_review') : data.fieldData;
+    for (const j of relevant.slice(0, FIELD_DATA_CHIP_CAP)) evidence.push({ kind: 'captureJob', id: j.id, label: T.captureLabel(j.mode, j.createdAt) });
   }
-  if (intent.wantsReview || intent.wantsSummary) {
+  if (intent.wantsReview || intent.wantsOverview) {
     data.issues = await extractProjectIssues(projectId, userId);
   }
 
-  if (intent.wantsTraverse || intent.wantsPolar || intent.wantsCreatedPoints) {
+  if (intent.wantsTraverse || intent.wantsPolar || intent.wantsProcessing || intent.wantsCreatedPoints) {
+    const filter = processingFilter(intent);
     const runs = await listProcessingRuns(projectId);
-    let filtered = runs;
-    if (intent.wantsTraverse && !intent.wantsPolar) filtered = filtered.filter((r) => r.processingType === 'traverse');
-    if (intent.wantsPolar && !intent.wantsTraverse) filtered = filtered.filter((r) => r.processingType === 'polar');
-    if (intent.wantsOpenOnly) filtered = filtered.filter((r) => r.processingType === 'traverse' && r.traverseType === 'OPEN');
+    const filtered = runs.filter((r) => {
+      if (filter === 'open') return r.processingType === 'traverse' && r.traverseType === 'OPEN';
+      if (filter === 'traverse') return r.processingType === 'traverse';
+      if (filter === 'polar') return r.processingType === 'polar';
+      return true;
+    });
+    data.processingQuery = { filter, matchCount: filtered.length };
     data.processingRuns = filtered.slice(0, 10);
     if (filtered.length) {
       const detail = await getProcessingRun(projectId, filtered[0].id);
       if (detail.status === 'FOUND') {
         data.latestMatchingRunDetail = detail;
-        evidence.push({ kind: 'processingRun', id: filtered[0].id, label: detail.summary.processingType === 'traverse' ? 'Полигонов ход' : 'Полярна обработка' });
+        evidence.push({ kind: 'processingRun', id: filtered[0].id, label: T.runLabel(detail.summary) });
       }
     }
+  } else if (intent.wantsOverview && summary.processing && summary.processing.total > 0) {
+    data.recentRuns = (await listProcessingRuns(projectId)).slice(0, 3);
   }
 
   if (intent.wantsReports) {
     data.reports = await listReports(projectId);
-    for (const r of data.reports) evidence.push({ kind: 'report', id: r.id, label: r.title });
+    for (const r of data.reports.slice(0, FIELD_DATA_CHIP_CAP)) evidence.push({ kind: 'report', id: r.id, label: r.title });
   }
   if (intent.wantsCalculations) {
     data.calculations = await getCalculationHistory(projectId);
@@ -92,29 +115,12 @@ async function buildContext({ projectId, userId, question }) {
   return { intent, data, evidence: dedupeEvidence(evidence) };
 }
 
-/**
- * V1.0.1 production fix: `data` carries raw Mongo ObjectId strings (point/run/report/... `id`/`*Id` fields) so the
- * server can build `evidence` for source chips - but the LLM has no use for them (it already gets human-readable
- * `label`/`name` fields alongside every id) and a live production answer echoed one back in prose. Strip every
- * `id`/`_id`/`...Id` key before the data ever reaches the prompt; `context.evidence` (used for the API response's
- * clickable chips) is built separately and is NEVER passed through this function, so chip navigation is unaffected.
- */
-function stripInternalIds(value) {
-  if (Array.isArray(value)) return value.map(stripInternalIds);
-  if (value && typeof value === 'object' && !(value instanceof Date)) {
-    const out = {};
-    for (const [key, v] of Object.entries(value)) {
-      if (/^_?id$/i.test(key) || /Id$/.test(key)) continue;
-      out[key] = stripInternalIds(v);
-    }
-    return out;
-  }
-  return value;
+/** The provider-facing data block: the semantic projection, never the internal `data` itself. */
+function formatContextForPrompt(context) {
+  return JSON.stringify(toSemanticContext(context), null, 2);
 }
 
-/** Renders the compact evidence bundle as a fenced JSON block for the provider prompt - never prose the LLM could reinterpret loosely. */
-function formatContextForPrompt(context) {
-  return JSON.stringify(stripInternalIds(context.data), null, 2);
-}
+/** Back-compat name (V1.0.1) for the hardened identifier redaction now living in semanticContext.js. */
+const stripInternalIds = redactInternalIdentifiers;
 
 module.exports = { buildContext, formatContextForPrompt, stripInternalIds };

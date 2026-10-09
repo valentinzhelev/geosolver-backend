@@ -1,16 +1,18 @@
 /**
  * The provenance graph resolver (V1 section 5): "Откъде идва тази точка?" -> an explicit step-by-step chain,
- * server-resolved, never guessed - and never exposing a raw Mongo model name to the user (the LLM turns this
- * structured chain into Bulgarian prose; this function only supplies the facts).
+ * server-resolved, never guessed. Step `label`s are product-level Bulgarian (gai/terminology.js) - internal model
+ * names never appear in them; the `kind`/`id` pair stays machine-readable for evidence chips only.
  *
  * Chains understood:
  *   SurveyPoint -> FieldProcessingRun -> FieldObservationSet -> CaptureJob   (polar/traverse-generated point)
  *   SurveyPoint -> CaptureJob                                                (coordinate-table import)
  *   SurveyPoint -> Calculation                                               (Canonical Engine "create point")
- *   SurveyPoint (no source at all)                                           (manually entered)
+ *   SurveyPoint (no recorded source)                                         (entered manually or imported)
  *
- * Every id in the chain is re-resolved by querying with the SAME projectId the caller already verified access
- * to - a point/run/job that does not belong to this project is simply absent from the chain, never followed.
+ * V1.0.2: for a processing-generated point it also resolves WHICH observation produced it - the run-level result
+ * (`sourceResult`: the polar target or traverse leg, incl. its persisted height reason) and the raw confirmed field
+ * measurement (`fieldMeasurement`). Every id is re-resolved with the SAME projectId - a record that does not belong
+ * to this project is simply absent from the chain, never followed.
  */
 const SurveyPoint = require('../../models/SurveyPoint');
 const FieldProcessingRun = require('../../models/FieldProcessingRun');
@@ -18,44 +20,67 @@ const FieldObservationSet = require('../../models/FieldObservationSet');
 const CaptureJob = require('../../models/CaptureJob');
 const Calculation = require('../../models/Calculation');
 const { publicPoint } = require('./points');
+const { summarizeRun, findRunResultForPoint } = require('./processing');
+const T = require('../terminology');
 
-const CAPTURE_MODE_LABEL = { 'field-notebook': 'Полев карнет', 'coordinate-table': 'Таблица с координати' };
+function fieldMeasurementFor(fos, runResult) {
+  if (!fos || !runResult) return null;
+  const setupIndex = runResult.kind === 'leg' ? runResult.leg.sourceObservation.setupIndex : runResult.setup.index;
+  const row = runResult.kind === 'leg' ? runResult.leg.sourceObservation.row : runResult.observation.index;
+  const setup = (fos.setups || []).find((s) => s.index === setupIndex);
+  const obs = setup && (setup.observations || []).find((o) => o.row === row);
+  if (!obs) return null;
+  return {
+    station: setup.station ? setup.station.point : null,
+    instrumentHeight: setup.station ? setup.station.instrumentHeight || null : null,
+    orientationTarget: setup.orientation ? setup.orientation.target : null,
+    target: obs.target, hz: obs.hz || null, vz: obs.vz || null, slopeDistance: obs.distance || null,
+    horizontalDistance: obs.horizontalDistance || null, prismHeight: obs.prismHeight || null,
+    code: obs.code || '', notes: obs.notes || '',
+  };
+}
 
 /** @param {string} projectId @param {string} pointId */
 async function tracePointProvenance(projectId, pointId) {
   const point = await SurveyPoint.findOne({ _id: pointId, projectId });
   if (!point) return { status: 'NOT_FOUND' };
 
-  const chain = [{ kind: 'point', id: String(point._id), label: point.name }];
+  const chain = [{ kind: 'point', id: String(point._id), label: T.pointLabel(point.name) }];
   const source = point.source;
+  let sourceResult = null;
+  let fieldMeasurement = null;
+  let runSummary = null;
+  let originKind = 'unrecorded';
 
   if (source && source.kind === 'field-processing' && source.processingRunId) {
+    originKind = 'processing';
     const run = await FieldProcessingRun.findOne({ _id: source.processingRunId, projectId });
     if (run) {
-      const isTraverse = (run.processingType || 'polar') === 'traverse';
-      chain.push({
-        kind: 'processingRun', id: String(run._id),
-        label: isTraverse ? 'Обработка на полигонов ход' : 'Полярна обработка',
-        processingType: run.processingType || 'polar',
-      });
-      const fos = run.source ? await FieldObservationSet.findOne({ _id: run.source.fieldObservationSetId, projectId }) : null;
+      const r = typeof run.toObject === 'function' ? run.toObject() : run;
+      runSummary = summarizeRun(r);
+      chain.push({ kind: 'processingRun', id: String(r._id), label: T.runLabel(runSummary), processingType: runSummary.processingType });
+      sourceResult = findRunResultForPoint(r, source);
+      const fos = r.source ? await FieldObservationSet.findOne({ _id: r.source.fieldObservationSetId, projectId }) : null;
       if (fos) {
-        chain.push({ kind: 'fieldObservationSet', id: String(fos._id), label: 'Потвърден полев карнет' });
+        chain.push({ kind: 'fieldObservationSet', id: String(fos._id), label: T.observationSetLabel(fos.confirmedAt) });
+        fieldMeasurement = fieldMeasurementFor(fos, sourceResult);
         const job = fos.source ? await CaptureJob.findOne({ _id: fos.source.captureJobId, project: projectId }) : null;
-        if (job) chain.push({ kind: 'captureJob', id: String(job._id), label: job.originalName || (CAPTURE_MODE_LABEL[job.mode] || 'Заснемане'), mode: job.mode });
+        if (job) chain.push({ kind: 'captureJob', id: String(job._id), label: T.captureLabel(job.mode, job.createdAt), mode: job.mode, fileName: (job.source && job.source.originalName) || '' });
       }
     }
   } else if (source && source.kind === 'capture' && source.captureJobId) {
+    originKind = 'capture';
     const job = await CaptureJob.findOne({ _id: source.captureJobId, project: projectId });
-    if (job) chain.push({ kind: 'captureJob', id: String(job._id), label: job.originalName || (CAPTURE_MODE_LABEL[job.mode] || 'Заснемане'), mode: job.mode });
+    if (job) chain.push({ kind: 'captureJob', id: String(job._id), label: T.captureLabel(job.mode, job.createdAt), mode: job.mode, fileName: (job.source && job.source.originalName) || '' });
   } else if (point.sourceCalculationId) {
-    const calc = await Calculation.findOne({ _id: point.sourceCalculationId, projectId }).select('toolDisplayName');
+    originKind = 'calculation';
+    const calc = await Calculation.findOne({ _id: point.sourceCalculationId, projectId }).select('toolDisplayName createdAt');
     if (calc) chain.push({ kind: 'calculation', id: String(calc._id), label: (calc.toolDisplayName && calc.toolDisplayName.bg) || 'Изчисление' });
   } else {
-    chain.push({ kind: 'manual', label: 'Ръчно въведена точка' });
+    chain.push({ kind: 'manual', label: 'Няма записан източник (въведена ръчно или импортирана)' });
   }
 
-  return { status: 'FOUND', point: publicPoint(point), chain };
+  return { status: 'FOUND', point: publicPoint(point), chain, originKind, runSummary, sourceResult, fieldMeasurement };
 }
 
 module.exports = { tracePointProvenance };

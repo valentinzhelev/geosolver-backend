@@ -56,10 +56,13 @@ describe('user-authored project content is data, never an instruction', () => {
     expect(ctx.data.points[0].point.y).toBe(500);
     // the injected text itself is present only as the literal, unparsed value of the notes field
     expect(ctx.data.points[0].point.notes).toBe(injected);
-    // formatContextForPrompt must not lose the fact that this is JSON DATA - it stays inside the notes string,
-    // never promoted into the surrounding prompt structure.
-    const rendered = formatContextForPrompt(ctx);
-    expect(JSON.parse(rendered).points[0].point.notes).toBe(injected);
+    // V1.0.2 semantic projection: the injected text stays a labelled user-authored DATA value inside the point,
+    // next to the REAL persisted coordinates - never promoted into the surrounding prompt structure.
+    const sem = JSON.parse(formatContextForPrompt(ctx));
+    const point = sem['Запитани точки'][0]['Точка'];
+    expect(point['Бележка (въведена от потребител)']).toBe(injected);
+    expect(point.X).toBe(500);
+    expect(point.Y).toBe(500);
   });
 
   it('an injection attempt in the QUESTION itself does not change which tools are invoked or what evidence is gathered', async () => {

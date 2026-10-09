@@ -39,4 +39,17 @@ async function getSurveyPointById(projectId, pointId) {
   return p ? { status: 'FOUND', point: publicPoint(p) } : { status: 'NOT_FOUND' };
 }
 
-module.exports = { listProjectPoints, getSurveyPointByName, getSurveyPointById, publicPoint };
+/**
+ * One real point name from this project for a starter question - preferring a processing-generated point (the
+ * most informative provenance), then a captured one, then any. Never suggests a point that does not exist.
+ */
+async function pickExamplePointName(projectId) {
+  for (const filter of [{ 'source.kind': 'field-processing' }, { 'source.kind': 'capture' }, {}]) {
+    // eslint-disable-next-line no-await-in-loop
+    const [p] = await SurveyPoint.find({ projectId, ...filter }).select('name').limit(1).lean();
+    if (p && p.name) return p.name;
+  }
+  return null;
+}
+
+module.exports = { listProjectPoints, getSurveyPointByName, getSurveyPointById, publicPoint, pickExamplePointName };

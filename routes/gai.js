@@ -6,11 +6,14 @@
  *   GET  /api/gai/conversations?projectId=...    list the caller's own conversations for a project
  *   GET  /api/gai/conversations/:id              one conversation with its messages
  *   POST /api/gai/conversations/:id/messages     ask a question -> {message, evidence}
+ *   GET  /api/gai/starters?projectId=...         context-aware starter questions (deterministic, no provider call)
  *
  * Every route: authentication + at least viewer access to the project (getProjectAccess/hasMinRole, same convention
- * as routes/reports.js). A conversation is private to the user who created it - GET never returns another user's
- * conversation even if they share the project, and the conversationId in the URL is always re-verified against
- * both req.userId AND the project the caller is asking about (section 16: never trust a client-supplied id alone).
+ * as routes/reports.js). A conversation is private to the user who created it, re-verified on every request.
+ *
+ * V1.0.2: errors are rendered ONLY from gai/errors.js's public table (no provider text can reach a client), and a
+ * question is persisted together with its answer only when generation succeeds - a failed attempt leaves the
+ * conversation exactly as it was, so retrying never duplicates anything.
  */
 const express = require('express');
 const mongoose = require('mongoose');
@@ -19,7 +22,9 @@ const { getProjectAccess, hasMinRole } = require('../utils/workspaceAccess');
 const GaiConversation = require('../models/GaiConversation');
 const GaiMessage = require('../models/GaiMessage');
 const { answerQuestion } = require('../gai/service');
-const { GaiError } = require('../gai/errors');
+const { toPublicError } = require('../gai/errors');
+const { getProjectSummary, pickExamplePointName } = require('../gai/tools');
+const { buildStarters } = require('../gai/starters');
 
 const router = express.Router();
 router.use(auth);
@@ -27,12 +32,13 @@ router.use(express.json({ limit: '8kb' }));
 
 const fail = (res, status, code, message) => res.status(status).json({ success: false, code, message });
 const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => {
-  if (e instanceof GaiError) return fail(res, e.status || 400, e.code, e.message);
-  console.error('gai: unexpected error', { name: e && e.name }); // never the raw message/context content
-  fail(res, 500, 'INTERNAL', 'Грешка.');
+  const pub = toPublicError(e);
+  if (pub.code === 'INTERNAL') console.error('gai: unexpected error', { name: e && e.name }); // never message/context
+  fail(res, pub.status, pub.code, pub.message);
 });
 
 const MAX_QUESTION_LENGTH = 2000;
+const HISTORY_LIMIT = 6;
 
 async function requireProjectAccess(req, res, projectId) {
   if (!projectId || !mongoose.isValidObjectId(projectId)) {
@@ -47,7 +53,7 @@ async function requireProjectAccess(req, res, projectId) {
   return access;
 }
 
-/** Loads a conversation and verifies it belongs to BOTH this user and (if projectId is known) this project. */
+/** Loads a conversation and verifies it belongs to BOTH this user and a project they can still access. */
 async function loadOwnConversation(req, res) {
   if (!mongoose.isValidObjectId(req.params.id)) {
     fail(res, 404, 'NOT_FOUND', 'Разговорът не е намерен.');
@@ -101,7 +107,7 @@ router.get('/conversations/:id', wrap(async (req, res) => {
   const conversation = await loadOwnConversation(req, res);
   if (!conversation) return;
 
-  const messages = await GaiMessage.find({ conversationId: conversation._id }).sort({ createdAt: 1 });
+  const messages = await GaiMessage.find({ conversationId: conversation._id }).sort({ createdAt: 1, _id: 1 });
   res.json({ success: true, data: { conversation: publicConversation(conversation), messages: messages.map(publicMessage) } });
 }));
 
@@ -113,26 +119,34 @@ router.post('/conversations/:id/messages', wrap(async (req, res) => {
   if (!question) return fail(res, 400, 'INVALID_REQUEST', 'Въпросът не може да бъде празен.');
   if (question.length > MAX_QUESTION_LENGTH) return fail(res, 400, 'INVALID_REQUEST', 'Въпросът е твърде дълъг.');
 
-  await GaiMessage.create({ conversationId: conversation._id, projectId: conversation.projectId, user: req.userId, role: 'user', text: question });
+  const recent = await GaiMessage.find({ conversationId: conversation._id }).sort({ createdAt: -1, _id: -1 }).limit(HISTORY_LIMIT);
+  const history = recent.reverse().map((m) => ({ role: m.role, text: m.text }));
 
+  // throws a normalised GaiError on any failure -> nothing below runs, nothing is persisted
   const { text, evidence, model, promptVersion } = await answerQuestion({
-    projectId: String(conversation.projectId), userId: req.userId, question,
+    projectId: String(conversation.projectId), userId: req.userId, question, history,
   });
 
+  await GaiMessage.create({ conversationId: conversation._id, projectId: conversation.projectId, user: req.userId, role: 'user', text: question });
   const assistantMessage = await GaiMessage.create({
     conversationId: conversation._id, projectId: conversation.projectId, user: req.userId, role: 'assistant',
     text, evidence, model, promptVersion,
   });
 
-  if (!conversation.title) {
-    conversation.title = question.slice(0, 80);
-    await conversation.save();
-  } else {
-    conversation.updatedAt = new Date();
-    await conversation.save();
-  }
+  if (!conversation.title) conversation.title = question.slice(0, 80);
+  conversation.updatedAt = new Date();
+  await conversation.save();
 
   res.status(201).json({ success: true, data: { message: publicMessage(assistantMessage), evidence: assistantMessage.evidence } });
+}));
+
+router.get('/starters', wrap(async (req, res) => {
+  const projectId = req.query && req.query.projectId;
+  const access = await requireProjectAccess(req, res, projectId);
+  if (!access) return;
+
+  const [summary, examplePoint] = await Promise.all([getProjectSummary(projectId), pickExamplePointName(projectId)]);
+  res.json({ success: true, data: buildStarters(summary, examplePoint) });
 }));
 
 module.exports = router;

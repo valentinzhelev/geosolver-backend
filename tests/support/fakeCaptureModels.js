@@ -459,14 +459,26 @@ const GaiMessage = {
   },
   find(filter = {}) {
     let sortSpec = null;
+    let limitN = null;
     const q = {
       sort(spec) { sortSpec = spec; return q; },
+      limit(n) { limitN = n; return q; },
       then(resolve, reject) {
         let arr = [...messageStore.rows.values()].filter((s) => matches(s, filter));
         if (sortSpec) {
-          const [key, dir] = Object.entries(sortSpec)[0];
-          arr.sort((a, b) => (a[key] > b[key] ? 1 : a[key] < b[key] ? -1 : 0) * dir);
+          // every key in order (e.g. {createdAt:1, _id:1}) - same tie-breaking as a real compound sort
+          const keys = Object.entries(sortSpec);
+          arr.sort((a, b) => {
+            for (const [key, dir] of keys) {
+              const av = a[key] instanceof Date ? a[key].getTime() : a[key];
+              const bv = b[key] instanceof Date ? b[key].getTime() : b[key];
+              if (av > bv) return dir;
+              if (av < bv) return -dir;
+            }
+            return 0;
+          });
         }
+        if (limitN) arr = arr.slice(0, limitN);
         return Promise.resolve(arr.map(clone)).then(resolve, reject);
       },
     };

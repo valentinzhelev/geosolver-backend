@@ -59,6 +59,7 @@ async function getProjectSummary(projectId) {
     reportCount: reports.length,
     calculationCount: calcCount,
     latestActivityCount: latestActivity.length,
+    recentActivity: latestActivity,
   };
 }
 

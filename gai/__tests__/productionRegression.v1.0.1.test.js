@@ -107,11 +107,16 @@ describe('V1.0.1 regression: 31 points, 2 legacy Field Books, 0 Capture jobs', (
     setProviderForTests('openai', null);
   });
 
-  it('the system prompt explicitly forbids raw ids in prose and unsupported absolute "no issues" claims', () => {
+  it('the system prompt forbids internal identifiers and unsupported absolute claims - without naming internals itself', () => {
+    // V1.0.2: the V1.0.1 prompt named the internal fields it warned about, which made the live model echo them.
     const { SYSTEM_PROMPT, PROMPT_VERSION } = require('../prompt/systemPrompt');
-    expect(PROMPT_VERSION).toBe('gai-v1.0.1');
-    expect(SYSTEM_PROMPT).toMatch(/сурови идентификатори/);
-    expect(SYSTEM_PROMPT).toMatch(/legacyFieldBooks/);
-    expect(SYSTEM_PROMPT).toMatch(/необосновани абсолютни твърдения/i);
+    const { FORBIDDEN_PROVIDER_TERMS } = require('../terminology');
+    expect(PROMPT_VERSION).toBe('gai-v1.0.2');
+    expect(SYSTEM_PROMPT).toMatch(/вътрешни идентификатори/);
+    expect(SYSTEM_PROMPT).toMatch(/БЕЗ НЕОБОСНОВАНИ ТВЪРДЕНИЯ/);
+    expect(SYSTEM_PROMPT).toMatch(/Не откривам елементи със статус „За проверка“|не откривам елементи със статус „За проверка“/);
+    for (const term of FORBIDDEN_PROVIDER_TERMS) {
+      expect(SYSTEM_PROMPT).not.toMatch(new RegExp(`(^|[^A-Za-z_])${term}([^A-Za-z_]|$)`));
+    }
   });
 });

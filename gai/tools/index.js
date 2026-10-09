@@ -4,7 +4,7 @@
  * even hidden ones (section 17).
  */
 const { getProjectSummary } = require('./projectSummary');
-const { listProjectPoints, getSurveyPointByName, getSurveyPointById } = require('./points');
+const { listProjectPoints, getSurveyPointByName, getSurveyPointById, pickExamplePointName } = require('./points');
 const { tracePointProvenance } = require('./provenance');
 const { listFieldData, getFieldDataItem } = require('./fieldData');
 const { listProcessingRuns, getProcessingRun } = require('./processing');
@@ -14,7 +14,7 @@ const { extractProjectIssues } = require('./issues');
 
 module.exports = {
   getProjectSummary,
-  listProjectPoints, getSurveyPointByName, getSurveyPointById,
+  listProjectPoints, getSurveyPointByName, getSurveyPointById, pickExamplePointName,
   tracePointProvenance,
   listFieldData, getFieldDataItem,
   listProcessingRuns, getProcessingRun,

@@ -199,17 +199,14 @@ describe('GAI_V1_ENABLED=false (release-security kill switch)', () => {
     expect(res.body.code).toBe('GAI_DISABLED');
   });
 
-  it('the user\'s own question is still persisted (conversation data remains intact) even though it goes unanswered', async () => {
+  it('a refused attempt leaves the conversation exactly as it was (V1.0.2: question+answer persist together, only on success)', async () => {
     const created = (await post('/conversations', { projectId: H.PROJECT })).body.data;
     await post(`/conversations/${created.id}/messages`, { text: 'Обобщи проекта' });
 
-    // re-enable to read the conversation back exactly as GAI_V1_ENABLED=false left it - reading is never gated.
-    process.env.GAI_V1_ENABLED = 'false';
     const res = await get(`/conversations/${created.id}`);
     expect(res.status).toBe(200);
-    expect(res.body.data.messages).toHaveLength(1);
-    expect(res.body.data.messages[0].role).toBe('user');
-    expect(res.body.data.messages[0].text).toBe('Обобщи проекта');
+    expect(res.body.data.messages).toHaveLength(0); // no orphan question, nothing to duplicate on retry
+    expect(res.body.data.conversation.title).toBeNull();
   });
 
   it('re-enabling the flag lets the SAME conversation continue normally', async () => {
@@ -220,5 +217,85 @@ describe('GAI_V1_ENABLED=false (release-security kill switch)', () => {
     const res = await post(`/conversations/${created.id}/messages`, { text: 'Втори опит' });
     expect(res.status).toBe(201);
     expect(res.body.data.message.text).toBe('Отговор от асистента.');
+  });
+});
+
+describe('V1.0.2 conversation history (follow-ups) - history is context, never evidence', () => {
+  const fx = require('../../tests/support/gaiFixtures');
+  const { DATA_START } = require('../../gai/context/semanticContext');
+  let provider;
+  beforeEach(async () => {
+    await fx.seedRichProject({ projectId: H.PROJECT, userId: H.OWNER });
+    provider = fakeGaiProvider({ reply: 'Отговор за обработката.' });
+    setProviderForTests('openai', provider);
+  });
+
+  it('a follow-up "…от него?" receives prior turns AND fresh evidence for the inherited topic', async () => {
+    const conv = (await post('/conversations', { projectId: H.PROJECT })).body.data;
+    await post(`/conversations/${conv.id}/messages`, { text: 'Обясни последната полярна обработка' });
+    const res = await post(`/conversations/${conv.id}/messages`, { text: 'Кои точки са създадени от него?' });
+    expect(res.status).toBe(201);
+
+    const msgs = provider.calls[1].messages;
+    expect(msgs.slice(0, 2)).toEqual([
+      { role: 'user', content: 'Обясни последната полярна обработка' },
+      { role: 'assistant', content: 'Отговор за обработката.' },
+    ]);
+    const last = msgs[msgs.length - 1].content;
+    expect(last.startsWith(DATA_START)).toBe(true); // the data block is always the final, current turn
+    const data = JSON.parse(last.slice(DATA_START.length, last.indexOf('<<<КРАЙ НА ДАННИТЕ>>>')));
+    expect(data['Избрана обработка (най-новата съответстваща)']['Вид']).toBe('Полярна обработка');
+    expect(data['Избрана обработка (най-новата съответстваща)']['Създадени точки в проекта']).toEqual(['201', '202']);
+  });
+
+  it('an old stored answer containing a raw Mongo id is masked before it is sent back to the provider', async () => {
+    const conv = (await post('/conversations', { projectId: H.PROJECT })).body.data;
+    const oid = '6a24728aa23b7d85a3236d01';
+    await GaiMessage.create({ conversationId: conv.id, projectId: H.PROJECT, user: H.OWNER, role: 'user', text: 'Обобщи проекта' });
+    await GaiMessage.create({ conversationId: conv.id, projectId: H.PROJECT, user: H.OWNER, role: 'assistant', text: `Проектът има идентификатор "${oid}".` });
+    await post(`/conversations/${conv.id}/messages`, { text: 'А колко точки има?' });
+    expect(JSON.stringify(provider.calls[0].messages)).not.toContain(oid);
+  });
+
+  it('only the most recent turns are sent (bounded history)', async () => {
+    const conv = (await post('/conversations', { projectId: H.PROJECT })).body.data;
+    for (let i = 0; i < 10; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await GaiMessage.create({ conversationId: conv.id, projectId: H.PROJECT, user: H.OWNER, role: i % 2 ? 'assistant' : 'user', text: `реплика ${i}` });
+    }
+    await post(`/conversations/${conv.id}/messages`, { text: 'Обобщи проекта' });
+    const sent = provider.calls[0].messages;
+    expect(sent).toHaveLength(7); // 6 history + the current turn
+    expect(sent[0].content).toBe('реплика 4');
+  });
+
+  it('messages are returned in a stable user -> assistant order', async () => {
+    const conv = (await post('/conversations', { projectId: H.PROJECT })).body.data;
+    await post(`/conversations/${conv.id}/messages`, { text: 'Обобщи проекта' });
+    await post(`/conversations/${conv.id}/messages`, { text: 'Кои отчети са генерирани?' });
+    const roles = (await get(`/conversations/${conv.id}`)).body.data.messages.map((m) => m.role);
+    expect(roles).toEqual(['user', 'assistant', 'user', 'assistant']);
+  });
+});
+
+describe('V1.0.2 GET /api/gai/starters - context-aware, never a nonexistent point', () => {
+  const fx = require('../../tests/support/gaiFixtures');
+
+  it('production-shaped project (no processing, no captures): no traverse/review starter, no "точка 201"', async () => {
+    await fx.seedProductionProject({ projectId: H.PROJECT, userId: H.OWNER });
+    const res = await get(`/starters?projectId=${H.PROJECT}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual(['Обобщи проекта', 'Как е получена точка 100?', 'Колко точки има проектът?']);
+  });
+
+  it('rich project: suggests review, the latest traverse, and a REAL processing-generated point', async () => {
+    await fx.seedRichProject({ projectId: H.PROJECT, userId: H.OWNER });
+    const res = await get(`/starters?projectId=${H.PROJECT}`);
+    expect(res.body.data).toEqual(['Обобщи проекта', 'Кои данни чакат проверка?', 'Обясни последния полигонов ход', 'Как е получена точка 201?']);
+  });
+
+  it('an empty project only suggests the summary; an inaccessible project is 404', async () => {
+    expect((await get(`/starters?projectId=${H.PROJECT}`)).body.data).toEqual(['Обобщи проекта']);
+    expect((await get(`/starters?projectId=${H.OTHER_PROJECT}`)).status).toBe(404);
   });
 });

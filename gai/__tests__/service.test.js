@@ -65,8 +65,10 @@ describe('gai/service answerQuestion', () => {
     expect(provider.calls).toHaveLength(1);
     expect(provider.calls[0].system).toBe(SYSTEM_PROMPT);
     const userContent = provider.calls[0].messages[0].content;
-    expect(userContent).toContain('projectSummary');
-    expect(userContent).toContain('"pointCount": 1');
+    // V1.0.2: the provider sees the semantic projection (product language), never the internal tool shape
+    expect(userContent).toContain('"Брой точки в проекта": 1');
+    expect(userContent).not.toContain('projectSummary');
+    expect(userContent).not.toContain('pointCount');
   });
 
   it('returns the evidence list produced by buildContext for source-chip rendering', async () => {
