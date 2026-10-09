@@ -5,7 +5,7 @@
  * never calls a live LLM (V2.5.x... V1 section 21).
  */
 const { createOpenAiProvider } = require('./openaiProvider');
-const { GaiError } = require('../errors');
+const { gaiError } = require('../errors');
 
 const overrides = new Map();
 let cached = null;
@@ -16,7 +16,7 @@ function getProvider(name = 'openai') {
     if (!cached) cached = createOpenAiProvider();
     return cached;
   }
-  throw new GaiError('PROVIDER_NOT_CONFIGURED');
+  throw gaiError('PROVIDER_NOT_CONFIGURED');
 }
 
 /** Test seam: replace (or with `null` restore) a provider by name. */
