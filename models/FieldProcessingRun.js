@@ -26,7 +26,10 @@ const fieldProcessingRunSchema = new mongoose.Schema(
     projectId: { type: mongoose.Schema.Types.ObjectId, ref: 'FieldBookProject', required: true, index: true },
     source: {
       fieldObservationSetId: { type: mongoose.Schema.Types.ObjectId, ref: 'FieldObservationSet', required: true, index: true },
-      captureJobId: { type: mongoose.Schema.Types.ObjectId, ref: 'CaptureJob', required: true },
+      // exactly one of the two, matching the FieldObservationSet this run read (capture-origin sets: every run that
+      // exists in production; session-origin sets: Field Sessions). Both are copied from the set, never client-supplied.
+      captureJobId: { type: mongoose.Schema.Types.ObjectId, ref: 'CaptureJob', required() { return !this.source || !this.source.fieldSessionId; } },
+      fieldSessionId: { type: mongoose.Schema.Types.ObjectId, ref: 'FieldSession' },
     },
     processingVersion: { type: String, required: true },
     // { orientation, horizontal, heightZenith, heightVertical, heightCombination } - the exact engine versions used,
