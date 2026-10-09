@@ -19,6 +19,7 @@ const FieldProcessingRun = require('../../models/FieldProcessingRun');
 const FieldObservationSet = require('../../models/FieldObservationSet');
 const CaptureJob = require('../../models/CaptureJob');
 const Calculation = require('../../models/Calculation');
+const FieldSession = require('../../models/FieldSession');
 const { publicPoint } = require('./points');
 const { summarizeRun, findRunResultForPoint } = require('./processing');
 const T = require('../terminology');
@@ -64,7 +65,14 @@ async function tracePointProvenance(projectId, pointId) {
       if (fos) {
         chain.push({ kind: 'fieldObservationSet', id: String(fos._id), label: T.observationSetLabel(fos.confirmedAt) });
         fieldMeasurement = fieldMeasurementFor(fos, sourceResult);
-        const job = fos.source ? await CaptureJob.findOne({ _id: fos.source.captureJobId, project: projectId }) : null;
+        // Field Sessions: a session-origin set names its session; an OCR-origin set may sit inside a session too
+        // (found through its capture job). Either way the session is a step between the evidence and its source.
+        const fromSession = !!(fos.source && fos.source.kind === 'session' && fos.source.fieldSessionId);
+        const job = !fromSession && fos.source && fos.source.captureJobId ? await CaptureJob.findOne({ _id: fos.source.captureJobId, project: projectId }) : null;
+        const session = fromSession
+          ? await FieldSession.findOne({ _id: fos.source.fieldSessionId, projectId })
+          : (job ? await FieldSession.findOne({ 'source.captureJobId': job._id, projectId }) : null);
+        if (session) chain.push({ kind: 'fieldSession', id: String(session._id), label: T.sessionLabel(session), sourceKind: session.source && session.source.kind });
         if (job) chain.push({ kind: 'captureJob', id: String(job._id), label: T.captureLabel(job.mode, job.createdAt), mode: job.mode, fileName: (job.source && job.source.originalName) || '' });
       }
     }

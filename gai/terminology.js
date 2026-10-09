@@ -10,7 +10,7 @@ const { MESSAGES: TRAVERSE_MESSAGES } = require('../fieldProcessing/processTrave
 
 /** Internal names that must never appear in provider-facing context or normal assistant prose (Section 2). */
 const FORBIDDEN_PROVIDER_TERMS = [
-  'CaptureJob', 'capture', 'legacyFieldBooks', 'FieldBook', 'FieldObservationSet', 'FieldProcessingRun',
+  'CaptureJob', 'capture', 'legacyFieldBooks', 'FieldBook', 'FieldSession', 'fieldSessionId', 'FieldObservationSet', 'FieldProcessingRun',
   'SurveyPoint', 'processingType', 'needs_review', 'sourceType', 'sourceId', 'engineVersion', 'MongoDB',
   'ObjectId', '_id', 'projectId', 'captureJobId', 'processingRunId', 'fieldObservationSetId', 'generatedPointIds',
   'field-processing', 'field-notebook', 'coordinate-table', 'project-points-snapshot', 'field-processing-run',
@@ -128,6 +128,12 @@ function captureLabel(mode, date) {
   return d ? `${m} · ${d}` : m;
 }
 
+/** "Теренна сесия · 09.10.2026" - a Field Session's product label (its own title is user text, so the day is used). */
+function sessionLabel(session) {
+  const d = formatDate(session && (session.date ? `${session.date}T12:00:00Z` : session.createdAt));
+  return d ? `Теренна сесия · ${d}` : 'Теренна сесия';
+}
+
 function observationSetLabel(confirmedAt) {
   const d = formatDate(confirmedAt);
   return d ? `Потвърдени теренни наблюдения · ${d}` : 'Потвърдени теренни наблюдения';
@@ -137,5 +143,5 @@ module.exports = {
   FORBIDDEN_PROVIDER_TERMS, ISSUE_CATEGORIES_CHECKED, UNKNOWN_STATE,
   CAPTURE_STATUS, CAPTURE_MODE, LEGACY_BOOK_TYPE, PROCESSING_TYPE, TRAVERSE_TYPE, TRAVERSE_STATUS,
   OBSERVATION_STATUS, REPORT_TYPE, VERTICAL_ANGLE_CONVENTION, ISSUE_KIND, CLOSURE_REASON,
-  label, reasonMessage, formatDate, formatMeasurement, pointLabel, runLabel, captureLabel, observationSetLabel,
+  label, reasonMessage, formatDate, formatMeasurement, pointLabel, runLabel, captureLabel, sessionLabel, observationSetLabel,
 };

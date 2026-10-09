@@ -10,6 +10,7 @@ jest.mock('../../../models/FieldProcessingRun', () => require('../../../tests/su
 jest.mock('../../../models/Report', () => require('../../../tests/support/fakeCaptureModels').Report);
 jest.mock('../../../models/Calculation', () => require('../../../tests/support/fakeCaptureModels').Calculation);
 jest.mock('../../../models/FieldBook', () => require('../../../tests/support/fakeCaptureModels').FieldBook);
+jest.mock('../../../models/FieldSession', () => require('../../../tests/support/fakeCaptureModels').FieldSession);
 jest.mock('../../../models/FieldBookProject');
 
 const SurveyPoint = require('../../../models/SurveyPoint');

@@ -7,6 +7,7 @@ jest.mock('../../models/FieldProcessingRun', () => require('../../tests/support/
 jest.mock('../../models/Report', () => require('../../tests/support/fakeCaptureModels').Report);
 jest.mock('../../models/Calculation', () => require('../../tests/support/fakeCaptureModels').Calculation);
 jest.mock('../../models/FieldBook', () => require('../../tests/support/fakeCaptureModels').FieldBook);
+jest.mock('../../models/FieldSession', () => require('../../tests/support/fakeCaptureModels').FieldSession);
 jest.mock('../../models/GaiConversation', () => require('../../tests/support/fakeCaptureModels').GaiConversation);
 jest.mock('../../models/GaiMessage', () => require('../../tests/support/fakeCaptureModels').GaiMessage);
 jest.mock('../../models/User');

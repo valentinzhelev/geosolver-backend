@@ -245,6 +245,8 @@ function originSteps(prov) {
     steps.push({ 'Стъпка': 'Създадена от обработка', 'Източник': run ? run.label : `${NOT_AVAILABLE} – обработката не е намерена в проекта` });
     const fos = byKind('fieldObservationSet');
     if (fos) steps.push({ 'Стъпка': 'Входни данни на обработката', 'Източник': fos.label });
+    const session = byKind('fieldSession');
+    if (session) steps.push({ 'Стъпка': 'Теренна сесия', 'Източник': session.label });
     const job = byKind('captureJob');
     if (job) steps.push({ 'Стъпка': 'Първоизточник', 'Източник': job.label, ...withIf(job.fileName, { 'Файл': untrusted(job.fileName, 120) }) });
   } else if (prov.originKind === 'capture') {

@@ -102,7 +102,7 @@ async function seedRichProject({ projectId, userId, notebookNotes202 = '' }) {
 }
 
 function resetAll() {
-  for (const m of ['SurveyPoint', 'CaptureJob', 'FieldObservationSet', 'FieldProcessingRun', 'Report', 'Calculation', 'FieldBook', 'GaiConversation', 'GaiMessage']) F[m].__reset();
+  for (const m of ['SurveyPoint', 'CaptureJob', 'FieldObservationSet', 'FieldProcessingRun', 'Report', 'Calculation', 'FieldBook', 'FieldSession', 'GaiConversation', 'GaiMessage']) F[m].__reset();
 }
 
 module.exports = { seedProductionProject, seedRichProject, resetAll };
