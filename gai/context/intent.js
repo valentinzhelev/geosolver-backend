@@ -20,7 +20,9 @@ const KEYWORDS = {
   fieldData: ['теренни данни', 'карнет', 'заснем', 'notebook'],
 };
 const CREATED = ['създаден', 'генериран'];
-const REFERENTIAL = ['него', 'нея', 'тях', 'този', 'тази', 'това', 'тези', 'същия', 'същата', 'същото', 'горния', 'горната', 'предишния', 'предишната', 'там'];
+const REFERENTIAL = ['той', 'тя', 'то', 'те', 'него', 'нея', 'тях', 'този', 'тази', 'това', 'тези', 'същия', 'същата', 'същото', 'горния', 'горната', 'предишния', 'предишната', 'там'];
+/** Whole-word match (Cyrillic-aware): "тя" must not match inside "тяло". */
+const REFERENTIAL_RE = new RegExp(`(^|[^\\p{L}])(${REFERENTIAL.join('|')})(?=$|[^\\p{L}])`, 'u');
 
 function containsAny(text, words) {
   return words.some((w) => text.includes(w));
@@ -69,7 +71,7 @@ function detectIntent(question, opts = {}) {
   // backwards-compatible alias: older callers/tests read `wantsSummary`
   intent.wantsSummary = intent.wantsOverview;
 
-  if (opts.previousQuestion && containsAny(` ${text} `, REFERENTIAL.map((w) => ` ${w}`))) {
+  if (opts.previousQuestion && REFERENTIAL_RE.test(text)) {
     const prev = detectIntent(opts.previousQuestion);
     const hasOwnTopic = intent.wantsTraverse || intent.wantsPolar || intent.wantsReports || intent.wantsReview
       || intent.wantsFieldData || intent.wantsCalculations || intent.pointNameCandidates.length > 0;

@@ -136,6 +136,24 @@ describe('Section 35 acceptance questions', () => {
   });
 });
 
+describe('an earlier (hallucinated) assistant answer never becomes evidence', () => {
+  it('a follow-up about a nonexistent point gets fresh NOT_FOUND evidence even if the previous answer invented coordinates', async () => {
+    const history = [
+      { role: 'user', text: 'Има ли точка 999 в проекта?' },
+      { role: 'assistant', text: 'Да, точка 999 е с координати X=0, Y=0, H=100.' }, // invented by a model
+    ];
+    await answerQuestion({ projectId: PROJECT, userId: USER, question: 'А каква кота има тя?', history });
+    const msgs = provider.calls[0].messages;
+    const turn = msgs[msgs.length - 1].content;
+    const data = JSON.parse(turn.slice(DATA_START.length, turn.indexOf(DATA_END)));
+    // topic inherited from the USER's previous question only; the evidence is a fresh lookup
+    expect(data['Запитани точки']).toEqual([{ 'Търсено име': '999', 'Резултат': 'В проекта няма точка с това име.' }]);
+    // the old answer is passed as conversation text, outside the data block, never inside it
+    expect(turn).not.toContain('X=0, Y=0');
+    expect(msgs[1]).toEqual({ role: 'assistant', content: 'Да, точка 999 е с координати X=0, Y=0, H=100.' });
+  });
+});
+
 describe('evidence chips carry product names, never internal kinds or ids as labels', () => {
   it.each(['Обобщи проекта', 'Как е получена точка 201?', 'Кои данни чакат проверка?', 'Обясни последния полигонов ход', 'Кои отчети са генерирани?'])('%s', async (q) => {
     const { evidence } = await answerQuestion({ projectId: PROJECT, userId: USER, question: q });

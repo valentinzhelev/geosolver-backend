@@ -85,7 +85,14 @@ function reasonMessage(code) {
   return CLOSURE_REASON[code] || TRAVERSE_MESSAGES[code] || 'Неуточнена причина.';
 }
 
-const DATE_PARTS = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Sofia', day: '2-digit', month: '2-digit', year: 'numeric' });
+/** Europe/Sofia when the runtime has time-zone data; a runtime without it must not crash every GAI route at load. */
+const DATE_PARTS = (() => {
+  try {
+    return new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Sofia', day: '2-digit', month: '2-digit', year: 'numeric' });
+  } catch {
+    return new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', day: '2-digit', month: '2-digit', year: 'numeric' });
+  }
+})();
 /** dd.mm.yyyy in Bulgarian local time (deterministic - not dependent on the server's locale). */
 function formatDate(value) {
   if (!value) return null;

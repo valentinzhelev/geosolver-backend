@@ -130,6 +130,13 @@ describe('coordinate convention: X = Northing, Y = Easting', () => {
     expect(p.Y).toBe(8512345.123);
     expect(p.H).toBe(612.5);
   });
+
+  it('the system prompt states the GeoSolver convention and the gon orientation explicitly', () => {
+    const { SYSTEM_PROMPT } = require('../prompt/systemPrompt');
+    expect(SYSTEM_PROMPT).toMatch(/X е северната координата \(Northing\), Y е източната координата \(Easting\)/);
+    expect(SYSTEM_PROMPT).toMatch(/0 gon е север, 100 gon е изток/);
+    expect(SYSTEM_PROMPT).toMatch(/по посока на часовниковата стрелка от \+X/);
+  });
 });
 
 describe('internal identifier redaction (adversarial nesting)', () => {

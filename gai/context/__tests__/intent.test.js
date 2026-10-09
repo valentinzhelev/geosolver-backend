@@ -62,6 +62,11 @@ describe('follow-up questions inherit the previous topic only when referential a
     expect(i.wantsTraverse).toBe(false);
   });
 
+  it('pronouns are matched as whole words only', () => {
+    expect(detectIntent('А каква кота има тя?', { previousQuestion: 'Има ли точка 999?' }).pointNameCandidates).toEqual(['999']);
+    expect(detectIntent('Колко е тялото на хода?', { previousQuestion: 'Има ли точка 999?' }).followUp).toBe(false);
+  });
+
   it('no previous question -> no inheritance', () => {
     expect(detectIntent('Кои точки са създадени от него?').wantsTraverse).toBe(false);
   });
