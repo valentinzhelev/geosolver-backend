@@ -39,7 +39,8 @@ function buildTraverseReportModel({ run, project, generatedBy, generatedAt, docu
     project: { id: String(project._id), name: project.name, crs: project.crs || null },
     source: {
       fieldObservationSetId: String(run.source.fieldObservationSetId),
-      captureJobId: String(run.source.captureJobId),
+      ...(run.source.captureJobId ? { captureJobId: String(run.source.captureJobId) } : {}),
+      ...(run.source.fieldSessionId ? { fieldSessionId: String(run.source.fieldSessionId) } : {}),
       processingRunId: String(run._id),
       processingVersion: run.processingVersion,
       engineVersions: run.engineVersions,

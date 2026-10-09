@@ -36,6 +36,11 @@ const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => {
   fail(res, 500, 'INTERNAL', 'Грешка.');
 });
 
+/** A run records which evidence it read: a capture-origin set carries its CaptureJob, a session-origin set its Field Session. */
+const runSource = (fos) => (fos.source && fos.source.kind === 'session'
+  ? { fieldObservationSetId: fos._id, fieldSessionId: fos.source.fieldSessionId }
+  : { fieldObservationSetId: fos._id, captureJobId: fos.source.captureJobId });
+
 const VALID_CONVENTIONS = ['zenith', 'vertical'];
 const norm = (s) => String(s || '').trim().toLowerCase();
 
@@ -56,7 +61,11 @@ function publicRun(run) {
   const base = {
     id: String(o._id),
     project: String(o.projectId),
-    source: { fieldObservationSetId: String(o.source.fieldObservationSetId), captureJobId: String(o.source.captureJobId) },
+    source: {
+      fieldObservationSetId: String(o.source.fieldObservationSetId),
+      captureJobId: o.source.captureJobId ? String(o.source.captureJobId) : null,
+      fieldSessionId: o.source.fieldSessionId ? String(o.source.fieldSessionId) : null,
+    },
     processingVersion: o.processingVersion,
     engineVersions: o.engineVersions,
     verticalAngleConvention: o.verticalAngleConvention || null,
@@ -120,7 +129,7 @@ router.post('/', express.json({ limit: '64kb' }), wrap(async (req, res) => {
   const run = await FieldProcessingRun.create({
     user: req.userId,
     projectId: fos.projectId,
-    source: { fieldObservationSetId: fos._id, captureJobId: fos.source.captureJobId },
+    source: runSource(fos),
     processingVersion: getConfig().processingVersion,
     engineVersions: currentVersions(),
     verticalAngleConvention,
@@ -169,7 +178,7 @@ router.post('/traverse', express.json({ limit: '64kb' }), wrap(async (req, res) 
   const run = await FieldProcessingRun.create({
     user: req.userId,
     projectId: fos.projectId,
-    source: { fieldObservationSetId: fos._id, captureJobId: fos.source.captureJobId },
+    source: runSource(fos),
     processingVersion: getConfig().processingVersion,
     engineVersions: currentVersions(),
     verticalAngleConvention,

@@ -189,14 +189,20 @@ const observationSetStore = makeStore('FieldObservationSet');
 
 const FieldObservationSet = {
   async create(data) {
-    const key = String(data.source.captureJobId);
-    if ([...observationSetStore.rows.values()].some((d) => String(d.source.captureJobId) === key)) {
+    const isSession = data.source && data.source.kind === 'session';
+    const dupKey = isSession ? ['fieldSessionId', data.source.fieldSessionId] : ['captureJobId', data.source.captureJobId];
+    // the partial unique indexes: one set per capture job, one per field session
+    if (dupKey[1] !== undefined && dupKey[1] !== null && [...observationSetStore.rows.values()].some((d) => String(d.source[dupKey[0]]) === String(dupKey[1]))) {
       const err = new Error('E11000 duplicate key error');
       err.code = 11000;
       throw err;
     }
+    if (!isSession && !data.source.captureJobId) throw new Error('FieldObservationSet validation failed: source.captureJobId is required');
     const now = new Date();
-    const snap = clone({ ...data, _id: newId(), user: String(data.user), projectId: String(data.projectId), source: { ...data.source, captureJobId: String(data.source.captureJobId) }, confirmedAt: data.confirmedAt || now, createdAt: now, updatedAt: now });
+    const source = { ...data.source };
+    if (source.captureJobId) source.captureJobId = String(source.captureJobId);
+    if (source.fieldSessionId) source.fieldSessionId = String(source.fieldSessionId);
+    const snap = clone({ ...data, _id: newId(), user: String(data.user), projectId: String(data.projectId), source, confirmedAt: data.confirmedAt || now, createdAt: now, updatedAt: now });
     observationSetStore.rows.set(snap._id, snap);
     return clone(snap);
   },
@@ -231,7 +237,11 @@ const FieldProcessingRun = {
     });
     snap.user = String(snap.user);
     snap.projectId = String(snap.projectId);
-    snap.source = { fieldObservationSetId: String(snap.source.fieldObservationSetId), captureJobId: String(snap.source.captureJobId) };
+    snap.source = {
+      fieldObservationSetId: String(snap.source.fieldObservationSetId),
+      ...(snap.source.captureJobId ? { captureJobId: String(snap.source.captureJobId) } : {}),
+      ...(snap.source.fieldSessionId ? { fieldSessionId: String(snap.source.fieldSessionId) } : {}),
+    };
     processingRunStore.rows.set(snap._id, snap);
     return wrapRun(snap);
   },
@@ -400,6 +410,103 @@ const FieldBook = {
   __all() { return [...fieldBookStore.rows.values()].map(clone); },
 };
 
+/* ------------------------------------------------------------------ FieldSession (Field Sessions V2) */
+const sessionStore = makeStore('FieldSession');
+let sessionClock = 0;
+
+function setPath(obj, path, value) {
+  const keys = path.split('.');
+  let cur = obj;
+  for (const k of keys.slice(0, -1)) { if (isNil(cur[k]) || typeof cur[k] !== 'object') cur[k] = {}; cur = cur[k]; }
+  cur[keys[keys.length - 1]] = value;
+}
+
+/** Applies a Mongo-style update (`$set` with dotted paths, `$inc`) to a snapshot in place. */
+function applyUpdate(snap, update) {
+  for (const [path, value] of Object.entries(update.$set || {})) setPath(snap, path, value instanceof Date ? value : clone(value));
+  for (const [path, by] of Object.entries(update.$inc || {})) setPath(snap, path, (getPath(snap, path) || 0) + by);
+  snap.updatedAt = new Date();
+}
+
+function dupCaptureAttach(snapshot, exceptId) {
+  const cj = snapshot.source && snapshot.source.captureJobId;
+  if (isNil(cj)) return;
+  if ([...sessionStore.rows.values()].some((r) => r._id !== exceptId && r.source && String(r.source.captureJobId) === String(cj))) {
+    const err = new Error('E11000 duplicate key error');
+    err.code = 11000;
+    throw err;
+  }
+}
+
+const FieldSession = {
+  async create(data) {
+    sessionClock += 1;
+    const now = new Date(Date.now() + sessionClock); // strictly increasing, so "newest first" is deterministic
+    const snap = clone({
+      title: '', date: '', operator: '', instrument: '', instrumentSerial: '', conditions: '', notes: '', angleUnit: 'gon',
+      status: 'draft', revision: 0, setups: [], confirmClaimedAt: null, ...data,
+      source: { kind: null, ...(data.source || {}) }, _id: newId(), createdAt: now, updatedAt: now,
+    });
+    snap.user = String(snap.user);
+    snap.projectId = String(snap.projectId);
+    if (snap.source.captureJobId) snap.source.captureJobId = String(snap.source.captureJobId);
+    if (snap.revisionOf) snap.revisionOf = String(snap.revisionOf);
+    dupCaptureAttach(snap, snap._id);
+    sessionStore.rows.set(snap._id, snap);
+    return clone(snap);
+  },
+  async findById(id) { const s = sessionStore.rows.get(String(id)); return s ? clone(s) : null; },
+  async findOne(filter) { const s = [...sessionStore.rows.values()].find((r) => matches(r, filter)); return s ? clone(s) : null; },
+  find(filter = {}) {
+    let sortSpec = null;
+    let limitN = null;
+    const q = {
+      sort(spec) { sortSpec = spec; return q; },
+      limit(n) { limitN = n; return q; },
+      select() { return q; },
+      lean() { return q; },
+      then(resolve, reject) {
+        let arr = [...sessionStore.rows.values()].filter((r) => matches(r, filter));
+        if (sortSpec) {
+          const [key, dir] = Object.entries(sortSpec)[0];
+          arr.sort((a, b) => (a[key] > b[key] ? 1 : a[key] < b[key] ? -1 : 0) * dir);
+        }
+        if (limitN) arr = arr.slice(0, limitN);
+        return Promise.resolve(arr.map(clone)).then(resolve, reject);
+      },
+    };
+    return q;
+  },
+  async findOneAndUpdate(filter, update, opts = {}) {
+    const found = [...sessionStore.rows.values()].find((r) => matches(r, filter));
+    if (!found) return null;
+    const before = clone(found);
+    const next = clone(found);
+    applyUpdate(next, update);
+    dupCaptureAttach(next, next._id); // may throw E11000 before anything is stored
+    sessionStore.rows.set(next._id, next);
+    return clone(opts.new ? next : before);
+  },
+  async updateOne(filter, update) {
+    const found = [...sessionStore.rows.values()].find((r) => matches(r, filter));
+    if (!found) return { modifiedCount: 0 };
+    const next = clone(found);
+    applyUpdate(next, update);
+    sessionStore.rows.set(next._id, next);
+    return { modifiedCount: 1 };
+  },
+  async deleteOne(filter) {
+    const found = [...sessionStore.rows.values()].find((r) => matches(r, filter));
+    if (found) sessionStore.rows.delete(found._id);
+    return { deletedCount: found ? 1 : 0 };
+  },
+  async countDocuments(filter = {}) { return [...sessionStore.rows.values()].filter((r) => matches(r, filter)).length; },
+  /** test helper: write a stored snapshot directly (simulates a tampered / racing record) */
+  __mutate(id, fn) { const s = sessionStore.rows.get(String(id)); fn(s); sessionStore.rows.set(String(id), s); },
+  __reset() { sessionStore.rows.clear(); },
+  __all() { return [...sessionStore.rows.values()].map(clone); },
+};
+
 /* --------------------------------------------------------------- GaiConversation/GaiMessage (GAI V1) */
 const conversationStore = makeStore('GaiConversation');
 
@@ -500,4 +607,4 @@ function createMemoryStorage() {
   };
 }
 
-module.exports = { CaptureJob, SurveyPoint, FieldObservationSet, FieldProcessingRun, Report, ReportAsset, Calculation, FieldBook, GaiConversation, GaiMessage, createMemoryStorage, newId };
+module.exports = { CaptureJob, SurveyPoint, FieldObservationSet, FieldProcessingRun, Report, ReportAsset, Calculation, FieldBook, FieldSession, GaiConversation, GaiMessage, createMemoryStorage, newId };

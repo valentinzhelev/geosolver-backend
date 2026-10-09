@@ -70,6 +70,7 @@ const scanRoutes = require('./routes/scan');
 const captureRoutes = require('./routes/capture');
 const fieldProcessingRoutes = require('./routes/fieldProcessing');
 const reportsRoutes = require('./routes/reports');
+const fieldSessionsRoutes = require('./routes/fieldSessions');
 const gaiRoutes = require('./routes/gai');
 const projectCalculationsRoutes = require('./routes/projectCalculations');
 const localeMiddleware = require('./middleware/locale');
@@ -171,6 +172,7 @@ app.use('/api/teacher/templates', teacherTemplatesRoutes);
 app.use('/api/scan', scanRoutes);
 app.use('/api/capture', captureRoutes); // Capture V2.1 (the legacy /api/scan flow is intentionally untouched)
 app.use('/api/field-processing', fieldProcessingRoutes); // Field Processing V2.4.1 (deterministic, server-authoritative)
+app.use('/api/field-sessions', fieldSessionsRoutes); // Field Sessions (Теренна сесия): the field-to-office workflow's front door
 app.use('/api/reports', reportsRoutes); // Report / Document Engine V2.5 (renders persisted data, never recalculates)
 app.use('/api/gai', gaiRoutes); // GAI V1 Project Geodetic Assistant (read-only, grounded in persisted project data)
 app.use('/api/projects', projectCalculationsRoutes);
