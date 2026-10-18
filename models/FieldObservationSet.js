@@ -40,9 +40,12 @@ const fieldObservationSetSchema = new mongoose.Schema(
 
 // idempotency guards: confirming the same CaptureJob / the same Field Session twice can never create a second set.
 // PARTIAL unique indexes, because each kind leaves the other kind's id absent (a plain unique index would treat all
-// absent values as one duplicate `null`). The pre-Field-Sessions index was a plain unique index named
-// `source.captureJobId_1` - production needs scripts/migrate-field-observation-set-indexes.js run once (see it);
-// Mongo will not create this one beside the old one, and Mongoose reports that without crashing the app.
+// absent values as one duplicate `null`).
+// The pre-Field-Sessions index was a plain unique index named `source.captureJobId_1`. MongoDB 7 CAN build the
+// partial captureJobId index below beside it (autoIndex does so when this code boots, with no error), but that does
+// not make session evidence work: the old plain index still counts every session-origin set's missing captureJobId as
+// `null` and rejects the second one (E11000; the API answers 503 CONFIRM_UNAVAILABLE). The old index must be DROPPED -
+// run scripts/migrate-field-observation-set-indexes.js once (dry run first; it also checks the documents).
 fieldObservationSetSchema.index(
   { 'source.captureJobId': 1 },
   { unique: true, partialFilterExpression: { 'source.captureJobId': { $type: 'objectId' } }, name: 'source_captureJobId_unique_partial' }

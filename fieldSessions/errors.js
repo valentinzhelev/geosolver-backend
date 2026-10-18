@@ -17,6 +17,9 @@ const PUBLIC = {
   CAPTURE_FAILED: { status: 409, message: 'Неуспешно заснемане не може да се добави към сесия.' },
   CONFIRM_IN_PROGRESS: { status: 409, message: 'Потвърждаването вече е в ход.' },
   CONFIRM_FAILED: { status: 500, message: 'Потвърждаването не успя. Опитайте отново.' },
+  // 503, recoverable: the evidence store is not ready for session-origin sets yet (the one-time index migration has not
+  // been applied). The claim is released and nothing is lost - the same confirm succeeds once the migration has run.
+  CONFIRM_UNAVAILABLE: { status: 503, message: 'Потвърждаването временно не е налично – системата се обновява. Сесията е запазена, опитайте отново след малко.' },
   NOTHING_TO_SUBMIT: { status: 422, message: 'Добавете поне едно наблюдение, преди да изпратите за проверка.' },
   USE_CAPTURE_REVIEW: { status: 409, message: 'Тази сесия се потвърждава от прегледа на заснемането.' },
 };

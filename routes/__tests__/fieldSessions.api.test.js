@@ -292,6 +292,56 @@ describe('confirm: immutable evidence', () => {
     expect((await post(`/${s.id}/confirm`)).body.code).toBe('CONFIRM_IN_PROGRESS');
   });
 
+  describe('confirm before the one-time index migration (legacy plain unique index on source.captureJobId)', () => {
+    const e11000 = () => Object.assign(new Error('E11000 duplicate key error collection: fieldobservationsets index: source.captureJobId_1 dup key: { source.captureJobId: null }'), { code: 11000 });
+
+    it('answers a clean, recoverable 503 (not a generic 500), releases the claim, leaks nothing, and the same session confirms once the index is fixed', async () => {
+      const s = await create({ setups: goodSetups() });
+      const spy = jest.spyOn(FieldObservationSet, 'create').mockRejectedValueOnce(e11000());
+      const res = await post(`/${s.id}/confirm`);
+      expect(res.status).toBe(503);
+      expect(res.body).toMatchObject({ success: false, code: 'CONFIRM_UNAVAILABLE' });
+      expect(res.body.message).toBe('Потвърждаването временно не е налично – системата се обновява. Сесията е запазена, опитайте отново след малко.');
+      expect(JSON.stringify(res.body)).not.toMatch(/E11000|captureJobId|index|fieldobservationsets/);
+      // nothing half-done: no evidence, still editable, claim released
+      expect(FieldObservationSet.__all()).toHaveLength(0);
+      const stored = FieldSession.__all()[0];
+      expect(stored.status).not.toBe('confirmed');
+      expect(stored.confirmClaimedAt).toBeNull();
+      expect((await patch(`/${s.id}`, { operator: 'още може' })).status).toBe(200);
+      // the migration has been applied: the very same confirm now works, exactly once
+      spy.mockRestore();
+      const ok = await post(`/${s.id}/confirm`);
+      expect(ok.status).toBe(200);
+      expect(ok.body.alreadyConfirmed).toBe(false);
+      expect(FieldObservationSet.__all()).toHaveLength(1);
+      expect((await post(`/${s.id}/confirm`)).body.alreadyConfirmed).toBe(true);
+      expect(FieldObservationSet.__all()).toHaveLength(1);
+    });
+
+    it('a duplicate key that IS this session\'s own set stays idempotent (same evidence, no error)', async () => {
+      const s = await create({ setups: goodSetups() });
+      const first = await post(`/${s.id}/confirm`);
+      // simulate the lost race: the session lost its confirmation but its set exists, and create() hits the session index
+      FieldSession.__mutate(s.id, (row) => { row.status = 'review'; row.confirmClaimedAt = null; row.fieldObservationSetId = null; });
+      const spy = jest.spyOn(FieldObservationSet, 'create').mockRejectedValueOnce(e11000());
+      const again = await post(`/${s.id}/confirm`);
+      spy.mockRestore();
+      expect(again.status).toBe(200);
+      expect(again.body.data.observationSetId).toBe(first.body.data.observationSetId);
+      expect(FieldObservationSet.__all()).toHaveLength(1);
+    });
+
+    it('any other failure is still the generic CONFIRM_FAILED and also releases the claim', async () => {
+      const s = await create({ setups: goodSetups() });
+      jest.spyOn(FieldObservationSet, 'create').mockRejectedValueOnce(new Error('boom'));
+      const res = await post(`/${s.id}/confirm`);
+      expect(res.status).toBe(500);
+      expect(res.body.code).toBe('CONFIRM_FAILED');
+      expect(FieldSession.__all()[0].confirmClaimedAt).toBeNull();
+    });
+  });
+
   it('a confirmed session exposes the typed evidence (no OCR geometry) and only the processing it supports', async () => {
     const s = await create({ setups: goodSetups() });
     const d = (await post(`/${s.id}/confirm`)).body.data;

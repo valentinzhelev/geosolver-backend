@@ -234,7 +234,13 @@ async function confirmManualSession(session, userId) {
   } catch (e) {
     if (!isDuplicateKey(e)) { await release(); throw new FieldSessionError('CONFIRM_FAILED'); }
     const existing = await FieldObservationSet.findOne({ 'source.fieldSessionId': claimed._id });
-    if (!existing) { await release(); throw new FieldSessionError('CONFIRM_FAILED'); }
+    if (!existing) {
+      // A duplicate key that is NOT this session's own set: the only other unique index a set can hit is the legacy plain
+      // source.captureJobId_1 (every session-origin set has no captureJobId, i.e. null). The migration has not been applied.
+      await release();
+      console.error('field-sessions: confirm blocked by a legacy unique index on fieldobservationsets - run scripts/migrate-field-observation-set-indexes.js');
+      throw new FieldSessionError('CONFIRM_UNAVAILABLE');
+    }
     setId = existing._id;
   }
 
