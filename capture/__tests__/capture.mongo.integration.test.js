@@ -117,25 +117,36 @@ suite('Capture on a real MongoDB', () => {
   });
 
   it('V2.3 field-notebook pipeline -> stored draft -> confirm -> FieldObservationSet, through the real models; no SurveyPoint, no duplicate on a second confirm', async () => {
+    // The OCR fixture replays the words of the layout it was built from, so the notebook image needs the notebook layout's
+    // words - the suite-wide provider replays the coordinate table. Restored afterwards for the table tests.
+    setProviderForTests('google-vision', H.fixtureProvider(notebookCapture.layout));
     const job = await jobService.createJob({ userId, projectId: new mongoose.Types.ObjectId(), buffer: notebookCapture.image, originalName: 'notebook.png', mode: 'field-notebook' });
-    await jobService.processJob(job, {});
+    try {
+      await jobService.processJob(job, {});
+    } finally {
+      setProviderForTests('google-vision', H.fixtureProvider(capture.layout));
+    }
     const reloaded = await CaptureJob.findById(job._id);
     expect(reloaded.mode).toBe('field-notebook');
     expect(reloaded.status).toBe('needs_review');
     expect(reloaded.notebook.setups[0].station.point.rawText).toBe(notebookFixtures.TRUTH.setups[0].station);
     expect(reloaded.validationSummary.canConfirm).toBe(true);
 
+    // The database is shared by the whole suite and earlier tests write SurveyPoints on purpose, so "no SurveyPoint" is
+    // asserted as "the collection is unchanged by the notebook confirm" (the fake-model E2E resets its store instead).
+    const pointsBefore = await SurveyPoint.countDocuments({});
     const result = await notebookImportService.confirmNotebookJob(reloaded);
     expect(result.alreadyConfirmed).toBe(false);
     const sets = await FieldObservationSet.find({ 'source.captureJobId': job._id }).lean();
     expect(sets).toHaveLength(1);
     expect(sets[0].setups[0].observations).toHaveLength(notebookFixtures.TRUTH.setups[0].observations.length);
-    expect(await SurveyPoint.countDocuments({})).toBe(0);
+    expect(await SurveyPoint.countDocuments({})).toBe(pointsBefore);
 
     const again = await notebookImportService.confirmNotebookJob(await CaptureJob.findById(job._id));
     expect(again.alreadyConfirmed).toBe(true);
     expect(String(again.observationSetId)).toBe(String(sets[0]._id));
     expect(await FieldObservationSet.countDocuments({ 'source.captureJobId': job._id })).toBe(1);
+    expect(await SurveyPoint.countDocuments({})).toBe(pointsBefore);
   });
 
   it('an existing project point with the same name is a conflict and nothing is written', async () => {
