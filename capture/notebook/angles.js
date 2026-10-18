@@ -103,4 +103,19 @@ function inferColumnAngleUnit(rawValues) {
   return { unit: null, mixed: units.size > 1 };
 }
 
-module.exports = { parseAngle, inferColumnAngleUnit, inCircleBounds };
+/**
+ * A decimal angle whose unit is ALREADY known from a machine-readable source (an instrument file's explicit unit code), e.g.
+ * "179.20860" + 'gon'. The same result shape and the same full-circle bounds as parseAngle's explicit-unit forms - but any number
+ * of decimals, because an instrument records 0.1 mgon / 0.1" resolution that the hand-written notebook grammar (at most 4
+ * decimals) deliberately does not accept. Never used for OCR or typed text; never infers a unit.
+ * @param {string} text an optionally signed plain decimal number
+ * @param {'gon'|'deg'} unit
+ */
+function angleWithUnit(text, unit) {
+  if (!/^[+-]?\d{1,3}(?:\.\d+)?$/.test(String(text)) || !['gon', 'deg'].includes(unit)) return result('invalid', { reason: 'MALFORMED_ANGLE' });
+  const value = Number(text);
+  if (!Number.isFinite(value) || !inCircleBounds(value, unit)) return result('invalid', { reason: 'ANGLE_OUT_OF_RANGE' });
+  return result('ok', { value, unit, components: null });
+}
+
+module.exports = { parseAngle, inferColumnAngleUnit, inCircleBounds, angleWithUnit };

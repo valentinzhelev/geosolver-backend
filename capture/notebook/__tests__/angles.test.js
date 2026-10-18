@@ -1,4 +1,4 @@
-const { parseAngle, inferColumnAngleUnit, inCircleBounds } = require('../angles');
+const { parseAngle, inferColumnAngleUnit, inCircleBounds, angleWithUnit } = require('../angles');
 
 describe('gon parsing (explicit suffix)', () => {
   it.each(['94.5000g', '94,5000 gon', '94.5 grad', '94.5G'])('%s -> 94.5 gon', (text) => {
@@ -101,5 +101,21 @@ describe('inCircleBounds', () => {
     expect(inCircleBounds(400, 'gon')).toBe(false);
     expect(inCircleBounds(359.9, 'deg')).toBe(true);
     expect(inCircleBounds(-10, 'deg')).toBe(true); // magnitude-based, a negative bearing offset is still "in bounds"
+  });
+});
+
+describe('angleWithUnit (machine-readable unit, e.g. an instrument file)', () => {
+  it('keeps full instrument resolution and the given unit', () => {
+    expect(angleWithUnit('179.20860', 'gon')).toEqual({ status: 'ok', value: 179.2086, unit: 'gon', components: null, reason: null });
+    expect(angleWithUnit('-0.00005', 'deg')).toMatchObject({ status: 'ok', value: -0.00005, unit: 'deg' });
+  });
+  it.each([['400.00000', 'gon'], ['360.1', 'deg']])('%s %s is out of range', (t, u) => {
+    expect(angleWithUnit(t, u)).toMatchObject({ status: 'invalid', reason: 'ANGLE_OUT_OF_RANGE' });
+  });
+  it.each([['12a', 'gon'], ['1.2.3', 'gon'], ['1e2', 'gon'], ['', 'gon'], ['12', 'mil'], ['1234', 'deg']])('%s %s is malformed', (t, u) => {
+    expect(angleWithUnit(t, u)).toMatchObject({ status: 'invalid', reason: 'MALFORMED_ANGLE' });
+  });
+  it('does not change the hand-written grammar (5 decimals stay rejected there)', () => {
+    expect(parseAngle('179.20860g').status).toBe('invalid');
   });
 });
