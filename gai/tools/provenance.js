@@ -5,6 +5,7 @@
  *
  * Chains understood:
  *   SurveyPoint -> FieldProcessingRun -> FieldObservationSet -> CaptureJob   (polar/traverse-generated point)
+ *   SurveyPoint -> FieldProcessingRun -> FieldObservationSet -> FieldSession -> InstrumentImport  (from an instrument file)
  *   SurveyPoint -> CaptureJob                                                (coordinate-table import)
  *   SurveyPoint -> Calculation                                               (Canonical Engine "create point")
  *   SurveyPoint (no recorded source)                                         (entered manually or imported)
@@ -20,6 +21,7 @@ const FieldObservationSet = require('../../models/FieldObservationSet');
 const CaptureJob = require('../../models/CaptureJob');
 const Calculation = require('../../models/Calculation');
 const FieldSession = require('../../models/FieldSession');
+const InstrumentImport = require('../../models/InstrumentImport');
 const { publicPoint } = require('./points');
 const { summarizeRun, findRunResultForPoint } = require('./processing');
 const T = require('../terminology');
@@ -35,6 +37,8 @@ function fieldMeasurementFor(fos, runResult) {
   return {
     // a multi-page session's observation says which notebook PAGE it was read from (1-based); absent for manual / single-capture data
     page: obs.source && Number.isInteger(obs.source.page) ? obs.source.page + 1 : null,
+    // an instrument-imported observation says which LINE of the file it came from; absent otherwise
+    fileLine: obs.source && obs.source.kind === 'instrument' && Number.isInteger(obs.source.line) ? obs.source.line : null,
     station: setup.station ? setup.station.point : null,
     instrumentHeight: setup.station ? setup.station.instrumentHeight || null : null,
     orientationTarget: setup.orientation ? setup.orientation.target : null,
@@ -84,6 +88,22 @@ async function tracePointProvenance(projectId, pointId) {
           });
         }
         if (job) chain.push({ kind: 'captureJob', id: String(job._id), label: T.captureLabel(job.mode, job.createdAt), mode: job.mode, fileName: (job.source && job.source.originalName) || '' });
+        // Instrument Import: the set records the file it was confirmed from; the import record (same project) adds its counts
+        if (fromSession && fos.instrumentImport && fos.instrumentImport.importId) {
+          const info = fos.instrumentImport;
+          const imp = await InstrumentImport.findOne({ _id: info.importId, projectId }).select('confirmed').lean();
+          const summary = imp && imp.confirmed && imp.confirmed.summary;
+          chain.push({
+            kind: 'instrumentImport',
+            id: String(info.importId),
+            label: T.instrumentImportLabel(info.vendor, info.format),
+            vendor: info.vendor,
+            format: info.format,
+            fileName: info.fileName || '',
+            observationCount: (fos.setups || []).reduce((n, s) => n + (s.observations || []).length, 0),
+            ...(summary ? { warningCount: summary.warnings || 0, excludedCount: summary.excluded || 0 } : {}),
+          });
+        }
       }
     }
   } else if (source && source.kind === 'capture' && source.captureJobId) {

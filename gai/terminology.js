@@ -139,6 +139,23 @@ function pageLabel(page) {
   return Number.isInteger(page) && page > 0 ? `Полеви карнет · страница ${page}` : 'Полеви карнет';
 }
 
+const INSTRUMENT_VENDOR = { leica: 'Leica' };
+const INSTRUMENT_FORMAT = { 'GSI-8': 'GSI-8', 'GSI-16': 'GSI-16' };
+
+/** "Импорт от Leica GSI-16" - an instrument file's product label (vendor + format; never a raw code). */
+function instrumentImportLabel(vendor, format) {
+  const v = label(INSTRUMENT_VENDOR, vendor, null);
+  const f = label(INSTRUMENT_FORMAT, format, null);
+  return v ? `Импорт от ${v}${f ? ` ${f}` : ''}` : 'Импорт от инструмент';
+}
+
+/** "Тези наблюдения са импортирани от Leica GSI-16." */
+function instrumentImportSentence(vendor, format) {
+  const v = label(INSTRUMENT_VENDOR, vendor, null);
+  const f = label(INSTRUMENT_FORMAT, format, null);
+  return v ? `Тези наблюдения са импортирани от ${v}${f ? ` ${f}` : ''}.` : 'Тези наблюдения са импортирани от файл на инструмент.';
+}
+
 function observationSetLabel(confirmedAt) {
   const d = formatDate(confirmedAt);
   return d ? `Потвърдени теренни наблюдения · ${d}` : 'Потвърдени теренни наблюдения';
@@ -149,4 +166,5 @@ module.exports = {
   CAPTURE_STATUS, CAPTURE_MODE, LEGACY_BOOK_TYPE, PROCESSING_TYPE, TRAVERSE_TYPE, TRAVERSE_STATUS,
   OBSERVATION_STATUS, REPORT_TYPE, VERTICAL_ANGLE_CONVENTION, ISSUE_KIND, CLOSURE_REASON,
   label, reasonMessage, formatDate, formatMeasurement, pointLabel, runLabel, captureLabel, sessionLabel, pageLabel, observationSetLabel,
+  instrumentImportLabel, instrumentImportSentence,
 };

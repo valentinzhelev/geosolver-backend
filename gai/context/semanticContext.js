@@ -255,6 +255,18 @@ function originSteps(prov) {
     }
     const job = byKind('captureJob');
     if (job) steps.push({ 'Стъпка': 'Първоизточник', 'Източник': job.label, ...withIf(job.fileName, { 'Файл': untrusted(job.fileName, 120) }) });
+    const imp = byKind('instrumentImport');
+    if (imp) {
+      steps.push({
+        'Стъпка': 'Първоизточник',
+        'Източник': imp.label,
+        'Описание': T.instrumentImportSentence(imp.vendor, imp.format),
+        ...withIf(imp.fileName, { 'Файл': untrusted(imp.fileName, 120) }),
+        ...withIf(isNum(imp.observationCount), { 'Потвърдени наблюдения от файла': imp.observationCount }),
+        ...withIf(isNum(imp.warningCount), { 'Предупреждения при импорта': imp.warningCount }),
+        ...withIf(imp.excludedCount, { 'Изключени записи от файла': imp.excludedCount }),
+      });
+    }
   } else if (prov.originKind === 'capture') {
     const job = byKind('captureJob');
     steps.push({ 'Стъпка': 'Импортирана от заснемане', 'Източник': job ? job.label : `${NOT_AVAILABLE} – заснемането не е намерено в проекта`, ...withIf(job && job.fileName, { 'Файл': untrusted(job && job.fileName, 120) }) });
@@ -301,6 +313,7 @@ function fieldMeasurementFacts(m) {
     'Височина на призмата': v(m.prismHeight, 'Не е записана'),
     ...withIf(m.code, { 'Код': untrusted(m.code, 40) }),
     ...withIf(m.notes, { 'Бележка в карнета (въведена от потребител)': untrusted(m.notes, 200) }),
+    ...withIf(isNum(m.fileLine), { 'Ред във файла на инструмента': m.fileLine }),
   };
 }
 
