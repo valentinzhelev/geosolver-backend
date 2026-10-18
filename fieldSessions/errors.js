@@ -20,6 +20,10 @@ const PUBLIC = {
   // 503, recoverable: the evidence store is not ready for session-origin sets yet (the one-time index migration has not
   // been applied). The claim is released and nothing is lost - the same confirm succeeds once the migration has run.
   CONFIRM_UNAVAILABLE: { status: 503, message: 'Потвърждаването временно не е налично – системата се обновява. Сесията е запазена, опитайте отново след малко.' },
+  PAGE_LIMIT_REACHED: { status: 409, message: 'Сесията е достигнала максималния брой страници. Създайте нова сесия за останалите.' },
+  PAGE_NOT_FOUND: { status: 404, message: 'Страницата не е намерена в тази сесия.' },
+  PAGE_DUPLICATE: { status: 409, message: 'Тази страница вече е в сесията.' },
+  PAGES_NOT_READY: { status: 409, message: 'Някои страници още не са готови. Изчакайте обработката или ги премахнете.' },
   NOTHING_TO_SUBMIT: { status: 422, message: 'Добавете поне едно наблюдение, преди да изпратите за проверка.' },
   USE_CAPTURE_REVIEW: { status: 409, message: 'Тази сесия се потвърждава от прегледа на заснемането.' },
 };

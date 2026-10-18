@@ -29,6 +29,10 @@ const fieldObservationSetSchema = new mongoose.Schema(
     arbitrationVersion: { type: String },
     validationVersion: { type: String },
     notebookVersion: { type: String },
+    // Multi-page notebook sessions only: the pages (in order) this set was merged from, with the exact versions that read
+    // each one - [{ page (0-based), captureJobId, pipelineVersion, recognitionVersion, arbitrationVersion, validationVersion }].
+    // Audit/provenance data; never shown to users. Each observation also carries `source: { page, captureJobId, setup, row }`.
+    pages: { type: mongoose.Schema.Types.Mixed },
     // setups: [{ index, station:{point,instrumentHeight,notes}, orientation:{target,direction}|null,
     //            observations: [{row,target,hz,vz,distance,horizontalDistance,prismHeight,code,notes,cells}] }]
     // (see capture/notebook/validation.js#evaluateNotebook - `setups` is exactly its import-ready output)

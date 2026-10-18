@@ -8,10 +8,12 @@ const mongoose = require('mongoose');
  *
  * It deliberately REFERENCES the authoritative records instead of duplicating them:
  *   - session metadata (this document): title, date, operator, instrument, conditions, notes, angle unit;
- *   - source observations: EXACTLY ONE source - manual raw entries held here in `setups` (a draft), or one attached
- *     Field Notebook CaptureJob (`source.captureJobId`, the OCR/review pipeline is reused untouched);
- *   - confirmed evidence: the immutable FieldObservationSet (manual: created by this session's confirm and linked by
- *     `fieldObservationSetId`; capture-backed: read from the CaptureJob, never copied here);
+ *   - source observations: EXACTLY ONE kind of source - manual raw entries held here in `setups` (a draft), or
+ *     ORDERED Field Notebook pages: `sources`, one CaptureJob per page (the OCR/review pipeline is reused untouched,
+ *     page by page). Manual and capture are never mixed in one session (two different evidence models: raw typed text
+ *     read with the session's angle unit vs OCR candidate cells with arbitration - mixing them makes authority ambiguous);
+ *   - confirmed evidence: the immutable FieldObservationSet (created by this session's confirm and linked by
+ *     `fieldObservationSetId`; sessions confirmed through the legacy single-capture path read it from their CaptureJob);
  *   - derived results: FieldProcessingRun / SurveyPoint / Report reference the FieldObservationSet; a session reads
  *     them through that link, it stores nothing about them.
  *
@@ -38,7 +40,21 @@ const fieldSessionSchema = new mongoose.Schema(
 
     source: {
       kind: { type: String, enum: ['manual', 'capture', null], default: null },
+      // LEGACY single-capture field. For capture-backed sessions it is only a MIRROR of page 1 (kept in step by every page
+      // operation, see fieldSessions/pages.js) so older readers keep working; `sources` is the authority when present.
       captureJobId: { type: mongoose.Schema.Types.ObjectId, ref: 'CaptureJob' },
+    },
+    // Notebook pages, in page order. ABSENT (undefined, not []) on records written before multi-page sessions: such a
+    // record is read as one page via fieldSessions/pages.js#pagesOf - no rewrite is required for it to keep working.
+    // Every change is a compare-and-set of this whole array on the session document (revision + lock in the filter).
+    sources: {
+      type: [new mongoose.Schema({
+        kind: { type: String, enum: ['capture'], default: 'capture' },
+        captureJobId: { type: mongoose.Schema.Types.ObjectId, ref: 'CaptureJob', required: true },
+        order: { type: Number, required: true }, // 0-based, dense (0..n-1), persisted - never inferred from array position
+        addedAt: { type: Date, default: Date.now },
+      }, { _id: false })],
+      default: undefined,
     },
 
     status: { type: String, enum: ['draft', 'review', 'confirmed'], default: 'draft' },
@@ -58,10 +74,21 @@ const fieldSessionSchema = new mongoose.Schema(
 
 fieldSessionSchema.index({ projectId: 1, createdAt: -1 });
 fieldSessionSchema.index({ revisionOf: 1 });
-// a Field Notebook capture belongs to at most ONE session (partial: manual sessions have no captureJobId)
+// a Field Notebook capture belongs to at most ONE session (partial: manual sessions have no captureJobId). Legacy field;
+// see sources_captureJobId_unique_partial below for the multi-page ownership constraint.
 fieldSessionSchema.index(
   { 'source.captureJobId': 1 },
   { unique: true, partialFilterExpression: { 'source.captureJobId': { $type: 'objectId' } }, name: 'source_captureJobId_unique_partial' }
+);
+
+// Page ownership, enforced by MongoDB itself: a CaptureJob is a page of at most ONE session. A unique MULTIKEY index
+// forbids the same job in two different sessions (E11000 -> CAPTURE_ALREADY_ATTACHED). It does NOT stop the same job
+// appearing twice inside ONE session's array (uniqueness is across documents) - that is rejected by the compare-and-set
+// page operations. Partial: manual sessions and legacy records (no `sources`) have no entries. Legacy records get
+// their `sources` from scripts/migrate-field-session-pages.js; until then the legacy index above covers them.
+fieldSessionSchema.index(
+  { 'sources.captureJobId': 1 },
+  { unique: true, partialFilterExpression: { 'sources.captureJobId': { $type: 'objectId' } }, name: 'sources_captureJobId_unique_partial' }
 );
 
 module.exports = mongoose.model('FieldSession', fieldSessionSchema);
