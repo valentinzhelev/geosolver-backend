@@ -42,20 +42,21 @@ const commonVersion = (versions, key) => {
   return set.size === 1 ? [...set][0] : undefined;
 };
 
+/** The ORIGINAL single-capture flow: the session's one page was confirmed through the capture review, so the session already reads that evidence. */
+async function confirmedViaCapture(sessionLike) {
+  const pages = pagesOf(sessionLike);
+  if (pages.length !== 1) return false;
+  const only = await CaptureJob.findById(pages[0].captureJobId);
+  return !!(only && String(only.project) === String(sessionLike.projectId) && only.status === 'confirmed' && only.importedFieldObservationSetId);
+}
+
 async function confirmCaptureSession(session, userId) {
   if (session.status === 'confirmed') {
     await freezePages(session, session.fieldObservationSetId); // a retry completes a freeze a crash may have interrupted
     return { alreadyConfirmed: true, session };
   }
 
-  // the ORIGINAL single-capture flow: the one page was confirmed through the capture review -> the session already reads it
-  const pages = pagesOf(session);
-  if (pages.length === 1) {
-    const only = await CaptureJob.findById(pages[0].captureJobId);
-    if (only && String(only.project) === String(session.projectId) && only.status === 'confirmed' && only.importedFieldObservationSetId) {
-      return { alreadyConfirmed: true, session };
-    }
-  }
+  if (await confirmedViaCapture(session)) return { alreadyConfirmed: true, session };
 
   const now = new Date();
   const stale = new Date(now.getTime() - STALE_CLAIM_MS);
@@ -72,6 +73,14 @@ async function confirmCaptureSession(session, userId) {
   const releaseSession = () => FieldSession.updateOne({ _id: claimed._id }, { $set: { confirmClaimedAt: null } }).catch(() => {});
 
   const claimedPages = pagesOf(claimed);
+  // the capture flow may confirm the one page while this request is claiming: that IS the confirmation (re-checked wherever we would give up)
+  const alreadyViaCapture = async () => {
+    if (!(await confirmedViaCapture(claimed))) return null;
+    await releaseSession();
+    return { alreadyConfirmed: true, session: await FieldSession.findById(claimed._id) };
+  };
+  const early = await alreadyViaCapture();
+  if (early) return early;
   if (!claimedPages.length) {
     await releaseSession();
     throw new FieldSessionError('VALIDATION_ERRORS', { summary: { pages: 0, setups: 0, observations: 0, errors: 1, warnings: 0, canConfirm: false }, errors: [{ code: 'NO_PAGES', severity: 'error', message: 'Добавете поне една страница.' }] });
@@ -86,6 +95,8 @@ async function confirmCaptureSession(session, userId) {
     const seen = await CaptureJob.find({ _id: { $in: claimedPages.map((p) => p.captureJobId) }, project: claimed.projectId });
     const preview = mergeSessionPages(claimed, new Map(seen.map((j) => [String(j._id), typeof j.toObject === 'function' ? j.toObject() : j])));
     if (!preview.summary.canConfirm) {
+      const viaCapture = await alreadyViaCapture();
+      if (viaCapture) return viaCapture;
       await releaseSession();
       throw new FieldSessionError('VALIDATION_ERRORS', { summary: preview.summary, errors: preview.issues.filter((i) => i.severity === 'error').slice(0, 100) });
     }
@@ -109,6 +120,8 @@ async function confirmCaptureSession(session, userId) {
       if (!job) {
         // a page is gone, failed, still processing, or the capture flow took it: nothing was created, nothing stays claimed
         await releaseJobs();
+        const viaCapture = await alreadyViaCapture();
+        if (viaCapture) return viaCapture;
         await releaseSession();
         throw new FieldSessionError('CONFIRM_IN_PROGRESS');
       }

@@ -25,6 +25,7 @@ const { CaptureError, isCaptureError } = require('../capture/errors');
 const { createJob, processJob, applyReviewEdits, publicJob, listJobs } = require('../capture/jobService');
 const { confirmJob } = require('../capture/importService');
 const { applyNotebookReviewEdits } = require('../capture/notebook/jobService');
+const { evaluateNotebook } = require('../capture/notebook/validation');
 const { confirmNotebookJob } = require('../capture/notebook/importService');
 const { assertWithinQuota } = require('../capture/quota');
 const { getStorage } = require('../capture/storage');
@@ -94,6 +95,14 @@ router.get('/jobs', wrap(async (req, res) => {
 
 router.get('/jobs/:id', wrap(async (req, res) => {
   const { job } = await loadOwnedJob(req);
+  // A page that belongs to a Field Session is shown the way the SESSION judges it: a leading table without a station line is the
+  // continuation of the previous page, not an unidentified station. Display only (nothing is stored); a standalone capture is
+  // shown exactly as stored, and its confirm still refuses a blank station.
+  if (job.mode === 'field-notebook' && job.notebook && job.status === 'needs_review' && await findSessionOwner(job._id)) {
+    const ev = evaluateNotebook(job.notebook, { arbitration: config.arbitration, allowContinuation: true });
+    const plain = typeof job.toObject === 'function' ? job.toObject() : { ...job };
+    return res.json({ success: true, data: publicJob({ ...plain, notebook: ev.notebook, validationSummary: ev.summary }) });
+  }
   res.json({ success: true, data: publicJob(job) });
 }));
 
@@ -111,7 +120,7 @@ router.get('/jobs/:id/image/:kind', wrap(async (req, res) => {
 
 router.patch('/jobs/:id/cells', express.json({ limit: '256kb' }), wrap(async (req, res) => {
   const { job, ctx } = await loadOwnedJob(req);
-  if (job.mode === 'field-notebook') await applyNotebookReviewEdits(job, req.body || {}, config);
+  if (job.mode === 'field-notebook') await applyNotebookReviewEdits(job, req.body || {}, config, { allowContinuation: !!(await findSessionOwner(job._id)) });
   else await applyReviewEdits(job, req.body || {}, ctx);
   res.json({ success: true, data: publicJob(job) });
 }));
@@ -121,8 +130,10 @@ router.patch('/jobs/:id/cells', express.json({ limit: '256kb' }), wrap(async (re
  * merged FieldObservationSet) - confirming one page alone would create a second, partial piece of authoritative evidence.
  * A single-page session may still be confirmed here (the original flow). Runs before AND, via `guard`, after the claim.
  */
+const findSessionOwner = (jobId) => FieldSession.findOne(ownerOfJob(jobId));
+
 async function refuseIfSessionPage(jobId) {
-  const owner = await FieldSession.findOne(ownerOfJob(jobId));
+  const owner = await findSessionOwner(jobId);
   if (owner && (owner.status === 'confirmed' || pagesOf(owner).length >= 2)) throw new CaptureError('BELONGS_TO_SESSION');
 }
 

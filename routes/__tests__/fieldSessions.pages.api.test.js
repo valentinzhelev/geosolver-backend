@@ -499,6 +499,57 @@ describe('the capture flow cannot create a second piece of evidence for a sessio
     expect((await addPage(s.id, await page2())).body.code).toBe('SESSION_CONFIRMED');
   });
 
+  describe('a continuation page is judged the way its SESSION judges it', () => {
+    const stationIssue = (job) => (job.notebook.setups[0].station.point.validation.issues || []).some((i) => i.code === 'STATION_REQUIRED');
+    const getJob = (id) => H.authed(app, 'get', `/api/capture/jobs/${id}`).then((r) => r.body.data);
+
+    it('standalone: its blank station is still an error (the capture confirm refuses it); in a session: it is the continuation of the previous page', async () => {
+      const [j1, j2] = [await page1(), await page2()];
+      const standalone = await getJob(j2._id);
+      expect(stationIssue(standalone)).toBe(true);
+      expect(standalone.validationSummary.canConfirm).toBe(false);
+      const s = await newSession();
+      await addPage(s.id, j1);
+      await addPage(s.id, j2);
+      const inSession = await getJob(j2._id);
+      expect(stationIssue(inSession)).toBe(false);
+      expect(inSession.validationSummary.canConfirm).toBe(true);
+      expect(inSession.notebook.setups[0].observations).toHaveLength(2);
+      // display only: nothing was written
+      expect(stationIssue(CaptureJob.__all().find((j) => j._id === String(j2._id)))).toBe(true);
+    });
+
+    it('a standalone continuation page cannot be confirmed through the capture flow (blank station)', async () => {
+      const j2 = await page2();
+      const res = await capturePost(`/jobs/${j2._id}/confirm`);
+      expect(res.status).toBe(422);
+      expect(FieldObservationSet.__all()).toHaveLength(0);
+    });
+
+    it('an edit made inside the session is evaluated continuation-aware (and persisted that way)', async () => {
+      const [j1, j2] = [await page1(), await page2()];
+      const s = await newSession();
+      await addPage(s.id, j1);
+      await addPage(s.id, j2);
+      const edit = await capturePatch(`/jobs/${j2._id}/cells`, { edits: [{ setup: 0, section: 'observation', row: 0, field: 'target', value: '299' }], baseRevision: 0 });
+      expect(edit.status).toBe(200);
+      expect(stationIssue(edit.body.data)).toBe(false);
+      expect(edit.body.data.validationSummary.canConfirm).toBe(true);
+      expect((await get(`/${s.id}`)).body.data.logical.setups[0].observations.map((o) => o.target)).toContain('299');
+    });
+
+    it('typing a station into the continuation page makes it an ordinary setup again (no longer a continuation)', async () => {
+      const [j1, j2] = [await page1(), await page2()];
+      const s = await newSession();
+      await addPage(s.id, j1);
+      await addPage(s.id, j2);
+      await capturePatch(`/jobs/${j2._id}/cells`, { edits: [{ setup: 0, section: 'station', field: 'point', value: '103' }], baseRevision: 0 });
+      const d = (await get(`/${s.id}`)).body.data;
+      expect(d.logical.setups.map((st) => st.station.point)).toEqual(['101', '103']);
+      expect(d.pages[1].continuesStation).toBeNull();
+    });
+  });
+
   it('a page whose capture is claimed mid-confirm cannot be edited', async () => {
     const j1 = await page1();
     CaptureJob.__mutate(j1._id, (r) => { r.confirmClaimedAt = new Date(); });
