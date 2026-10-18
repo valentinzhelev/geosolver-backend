@@ -19,6 +19,10 @@ const { processingOptions } = require('./options');
 const { displayTitle, sourceLabel, sourceKey, formatDay, formatInstant } = require('./labels');
 const { getConfig } = require('./config');
 const { FieldSessionError } = require('./errors');
+const { pagesOf, isCaptureBacked } = require('./pages');
+const { mergePages } = require('./pageMerge');
+const { evaluateNotebook } = require('../capture/notebook/validation');
+const { getConfig: getCaptureConfig } = require('../capture/config');
 
 const isDuplicateKey = (e) => e && (e.code === 11000 || (e.writeErrors && e.writeErrors.some((w) => w.code === 11000)));
 const str = (v) => (v === null || v === undefined ? null : String(v));
@@ -27,18 +31,47 @@ const ids = (list) => [...new Set(list.filter(Boolean).map(String))];
 const manualObservationCount = (setups) => (setups || []).reduce((n, s) => n + (s.observations || []).filter((o) => !isBlankRow(o)).length, 0);
 const evidenceObservationCount = (setups) => (setups || []).reduce((n, s) => n + (s.observations || []).length, 0);
 
+// what a page job contributes to a session view; the heavy `notebook` is loaded only for sessions that still need merging
+const JOB_FIELDS = 'status mode user validationSummary importedFieldObservationSetId failure confirmClaimedAt revision source.assets pipelineVersion recognitionVersion arbitrationVersion validationVersion notebookVersion';
+
+/** Evaluates each page job on its own (continuation-aware) and merges them: the one place a capture session is interpreted. */
+function mergeSessionPages(session, jobById) {
+  const config = getCaptureConfig();
+  return mergePages(pagesOf(session).map((p) => {
+    const job = jobById.get(p.captureJobId);
+    const ready = job && job.status === 'needs_review' && job.notebook;
+    return {
+      order: p.order,
+      pageId: p.pageId,
+      status: job ? job.status : 'missing',
+      failure: job && job.failure ? job.failure : null,
+      evaluated: ready ? evaluateNotebook(job.notebook, { arbitration: config.arbitration, allowContinuation: true }) : null,
+      versions: job ? { pipelineVersion: job.pipelineVersion, recognitionVersion: job.recognitionVersion, arbitrationVersion: job.arbitrationVersion, validationVersion: job.validationVersion } : {},
+    };
+  }));
+}
+
 /** Batched lookups for a set of sessions of ONE project. */
 async function loadContext(projectId, sessions) {
-  const captureIds = ids(sessions.map((s) => s.source && s.source.kind === 'capture' && s.source.captureJobId));
-  const jobs = captureIds.length
-    ? await CaptureJob.find({ _id: { $in: captureIds }, project: projectId }).select('status mode user validationSummary importedFieldObservationSetId').lean()
-    : [];
-  const jobById = new Map(jobs.map((j) => [String(j._id), j]));
+  const captureSessions = sessions.filter(isCaptureBacked);
+  const pageIdsOf = new Map(captureSessions.map((x) => [String(x._id), pagesOf(x).map((p) => p.captureJobId)]));
+  const needMerge = captureSessions.filter((x) => x.status !== 'confirmed');
+  const mergeIds = ids(needMerge.flatMap((x) => pageIdsOf.get(String(x._id))));
+  const summaryIds = ids(captureSessions.flatMap((x) => pageIdsOf.get(String(x._id)))).filter((id) => !mergeIds.includes(id));
+  const [full, light] = await Promise.all([
+    mergeIds.length ? CaptureJob.find({ _id: { $in: mergeIds }, project: projectId }).select(`${JOB_FIELDS} notebook`).lean() : [],
+    summaryIds.length ? CaptureJob.find({ _id: { $in: summaryIds }, project: projectId }).select(JOB_FIELDS).lean() : [],
+  ]);
+  const jobById = new Map([...full, ...light].map((j) => [String(j._id), j]));
+  const mergeBySession = new Map(needMerge.map((x) => [String(x._id), mergeSessionPages(x, jobById)]));
+  const jobsOf = (x) => pageIdsOf.get(String(x._id)).map((id) => jobById.get(id)).filter(Boolean);
 
+  // the evidence a session reads: its own confirmed set; or - the ORIGINAL single-capture flow only - the confirmed set
+  // of its one page job (a session of several pages has evidence only through its own confirm)
   const fosIdOf = (s) => {
-    if (s.source && s.source.kind === 'capture') {
-      const job = jobById.get(str(s.source.captureJobId));
-      return job && job.status === 'confirmed' ? str(job.importedFieldObservationSetId) : null;
+    if (isCaptureBacked(s) && s.status !== 'confirmed') {
+      const list = jobsOf(s);
+      return list.length === 1 && list[0].status === 'confirmed' ? str(list[0].importedFieldObservationSetId) : null;
     }
     return str(s.fieldObservationSetId);
   };
@@ -77,33 +110,80 @@ async function loadContext(projectId, sessions) {
     for (const s of editable) referenceBySession.set(String(s._id), referenceIssues(s.setups || [], points));
   }
 
-  return { jobById, fosIdOf, fosById, runsByFos, reportsByRun, revisedIds, referenceBySession };
+  return { jobById, jobsOf, mergeBySession, fosIdOf, fosById, runsByFos, reportsByRun, revisedIds, referenceBySession };
 }
 
-function captureInfo(session, job, userId) {
-  if (!session.source || session.source.kind !== 'capture') return null;
+/** The FIRST page, in the shape older clients read (a one-capture session). New clients read `pages`. */
+function captureInfo(session, jobs, userId) {
+  if (!isCaptureBacked(session)) return null;
+  const first = pagesOf(session)[0];
+  const job = first && jobs.find((j) => String(j._id) === first.captureJobId);
   const sum = (job && job.validationSummary) || {};
   return {
     attached: true,
     available: !!job, // false: the job is gone / not in this project - the session says so instead of guessing
     status: job ? job.status : null,
     mine: !!job && String(job.user) === String(userId), // only the uploader can open the OCR review
-    jobId: str(session.source.captureJobId),
+    jobId: first ? first.captureJobId : null,
     rows: sum.observations || 0,
     review: sum.review || 0,
     invalid: sum.invalid || 0,
   };
 }
 
+const unionBox = (cells) => {
+  const boxes = Object.values(cells || {}).map((c) => c && c.bbox).filter(Boolean);
+  if (!boxes.length) return null;
+  const x0 = Math.min(...boxes.map((b) => b.x));
+  const y0 = Math.min(...boxes.map((b) => b.y));
+  return { x: x0, y: y0, w: Math.max(...boxes.map((b) => b.x + b.w)) - x0, h: Math.max(...boxes.map((b) => b.y + b.h)) - y0 };
+};
+
+/**
+ * One page as the client sees it. `state`: ready | failed | processing | missing | confirmed. `id` is an opaque handle
+ * the UI uses for its calls and never prints. `mine`: only the uploader may open/edit the page's OCR review.
+ */
+function pageView(page, job, mergePage, userId, confirmedObservations) {
+  const sum = (job && job.validationSummary) || {};
+  return {
+    id: page.pageId,
+    page: page.order + 1,
+    state: mergePage ? mergePage.state : (job ? (job.status === 'failed' ? 'failed' : 'confirmed') : 'missing'),
+    mine: !!job && String(job.user) === String(userId),
+    hasImage: !!(job && job.source && job.source.assets && job.source.assets.thumbnail),
+    setupCount: mergePage ? mergePage.setups : (sum.setups || 0),
+    observationCount: mergePage ? mergePage.observations : (confirmedObservations !== undefined ? confirmedObservations : (sum.observations || 0)),
+    errors: mergePage ? mergePage.errors : 0,
+    warnings: mergePage ? mergePage.warnings : 0,
+    continuesStation: mergePage ? mergePage.continuesStation : null,
+    repeatsStation: mergePage ? mergePage.repeatsStation : null,
+  };
+}
+
+/** The merged notebook for the unified review: typed values and page numbers only - no OCR cells, no internal ids. */
+function logicalView(merge) {
+  return {
+    setups: merge.setups.map((st) => ({
+      index: st.index,
+      station: st.station,
+      orientation: st.orientation,
+      pages: st.pages.map((o) => o + 1),
+      observations: st.observations.map(({ cells, source, ...o }) => ({ ...o, page: source.page + 1, pageSetup: source.setup, pageRow: source.row, bbox: unionBox(cells) })),
+    })),
+  };
+}
+
 /** One session -> its user-facing view. `detail` adds the heavy parts (raw setups, evaluation, runs, options). */
 function toView(session, ctx, { userId, detail = false }) {
   const extraIssues = ctx.referenceBySession.get(String(session._id)) || [];
-  const job = session.source && session.source.kind === 'capture' ? ctx.jobById.get(str(session.source.captureJobId)) : null;
+  const jobs = isCaptureBacked(session) ? ctx.jobsOf(session) : [];
+  const merge = ctx.mergeBySession.get(String(session._id)) || null;
   const fosId = ctx.fosIdOf(session);
   const fos = fosId ? ctx.fosById.get(fosId) : null;
   const runs = (fos && ctx.runsByFos.get(String(fos._id))) || [];
-  const derived = deriveStatus({ session, job, runCount: runs.length });
+  const derived = deriveStatus({ session, jobs, runCount: runs.length });
   const kind = sourceKey(session);
+  const pages = pagesOf(session);
 
   let setupCount = 0;
   let observationCount = 0;
@@ -117,11 +197,12 @@ function toView(session, ctx, { userId, detail = false }) {
     observationCount = manualObservationCount(session.setups);
     evaluation = evaluateSession(session);
     issues = { errors: evaluation.summary.errors, warnings: evaluation.summary.warnings + extraIssues.length };
-  } else if (kind === 'capture' && job) {
-    const sum = job.validationSummary || {};
-    setupCount = sum.setups || 0;
-    observationCount = sum.observations || 0;
-    issues = { errors: (sum.invalid || 0) + (sum.tableErrors || 0), warnings: (sum.review || 0) + (sum.tableWarnings || 0) };
+  } else if (kind === 'capture' && merge) {
+    // the SAME evaluation the confirm re-runs, so the list, the detail and the confirm always agree
+    setupCount = merge.summary.setups;
+    observationCount = merge.summary.observations;
+    issues = { errors: merge.summary.errors, warnings: merge.summary.warnings };
+    evaluation = { summary: { setups: merge.summary.setups, observations: merge.summary.observations, errors: merge.summary.errors, warnings: merge.summary.warnings, canConfirm: merge.summary.canConfirm, pages: merge.summary.pages }, issues: merge.issues };
   }
 
   const reportList = runs.flatMap((r) => ctx.reportsByRun.get(String(r._id)) || []);
@@ -144,7 +225,8 @@ function toView(session, ctx, { userId, detail = false }) {
     setupCount,
     observationCount,
     issues,
-    capture: captureInfo(session, job, userId),
+    capture: captureInfo(session, jobs, userId),
+    pageCount: pages.length,
     processing: { runCount: runs.length, pointCount, reportCount: reportList.length },
     revisionOf: str(session.revisionOf),
     hasRevision: ctx.revisedIds.has(String(session._id)),
@@ -167,8 +249,18 @@ function toView(session, ctx, { userId, detail = false }) {
     // manual drafts/reviews (and the frozen entries of a confirmed manual session): the raw text exactly as entered
     setups: kind === 'manual' ? (session.setups || []) : [],
     evaluation: evaluation ? { summary: { ...evaluation.summary, warnings: evaluation.summary.warnings + extraIssues.length }, issues: [...evaluation.issues, ...extraIssues] } : null,
-    // confirmed evidence, typed, without OCR cell geometry
-    evidence: fos ? { setups: (fos.setups || []).map((s) => ({ ...s, observations: (s.observations || []).map(({ cells, ...o }) => o) })) } : null,
+    // the pages of a capture-backed session, in order (empty for manual sessions), and - while it is still a draft - the
+    // merged logical notebook they currently make up
+    pages: pages.map((p) => {
+      const job = jobs.find((j) => String(j._id) === p.captureJobId);
+      const confirmedObs = fos && fos.pages
+        ? (fos.setups || []).reduce((n, st) => n + (st.observations || []).filter((o) => o.source && o.source.page === p.order).length, 0)
+        : undefined;
+      return pageView(p, job, merge && merge.pages.find((v) => v.order === p.order), userId, confirmedObs);
+    }),
+    logical: merge ? logicalView(merge) : null,
+    // confirmed evidence, typed, without OCR cell geometry or internal ids (a merged observation says which PAGE it came from)
+    evidence: fos ? { setups: (fos.setups || []).map((st) => ({ ...st, observations: (st.observations || []).map(({ cells, source, ...o }) => ({ ...o, ...(source && Number.isInteger(source.page) ? { page: source.page + 1 } : {}) })) })) } : null,
     processingOptions: fos ? processingOptions(fos.setups) : null,
     runs: runs.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map((r) => ({
       id: String(r._id),
@@ -252,4 +344,4 @@ async function confirmManualSession(session, userId) {
   return { alreadyConfirmed: false, session: done };
 }
 
-module.exports = { buildViews, confirmManualSession, manualObservationCount, isDuplicateKey };
+module.exports = { buildViews, confirmManualSession, manualObservationCount, isDuplicateKey, mergeSessionPages };

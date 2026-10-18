@@ -21,6 +21,7 @@ const FieldBookProject = require('../../models/FieldBookProject');
 const Workspace = require('../../models/Workspace');
 const F = require('../../tests/support/fakeCaptureModels');
 const H = require('../../tests/support/captureApiHarness');
+const pageFx = require('../../tests/support/pageFixtures');
 
 const { CaptureJob, FieldObservationSet, FieldProcessingRun, Report, FieldBook, FieldSession, SurveyPoint } = F;
 
@@ -354,9 +355,13 @@ describe('confirm: immutable evidence', () => {
 });
 
 describe('Field Notebook capture integration (the existing OCR pipeline is reused, never duplicated)', () => {
+  // a real page as the Capture pipeline leaves it: two stations, four observations each, nothing to fix
   const notebookJob = (over = {}) => CaptureJob.create({
-    user: H.OWNER, project: H.PROJECT, mode: 'field-notebook', status: 'needs_review',
-    source: { originalName: 'page1.jpg', assets: {} }, validationSummary: { setups: 2, observations: 8, review: 1, invalid: 2, tableErrors: 0, tableWarnings: 1 }, ...over,
+    ...pageFx.pageJobFields([
+      pageFx.station('101', [pageFx.obs('201'), pageFx.obs('202', '20.0000g'), pageFx.obs('203', '30.0000g'), pageFx.obs('204', '40.0000g')]),
+      pageFx.station('102', [pageFx.obs('205'), pageFx.obs('206', '20.0000g'), pageFx.obs('207', '30.0000g'), pageFx.obs('208', '40.0000g')], { orientationTarget: '101' }),
+    ], { user: H.OWNER, project: H.PROJECT }),
+    ...over,
   });
   const confirmJobWithSet = async (job) => {
     const fos = await FieldObservationSet.create({
@@ -374,7 +379,7 @@ describe('Field Notebook capture integration (the existing OCR pipeline is reuse
     expect(res.status).toBe(200);
     expect(res.body.data).toMatchObject({
       source: 'capture', sourceLabel: 'От снимка на полеви карнет', status: 'review', statusLabel: 'За проверка',
-      setupCount: 2, observationCount: 8, issues: { errors: 2, warnings: 2 },
+      setupCount: 2, observationCount: 8, issues: { errors: 0, warnings: 0 },
       capture: { attached: true, available: true, status: 'needs_review', mine: true, jobId: String(job._id) },
     });
     expect(res.body.data.setups).toEqual([]); // no entries are duplicated into the session
@@ -422,14 +427,14 @@ describe('Field Notebook capture integration (the existing OCR pipeline is reuse
     expect((await post('/', { projectId: H.PROJECT, captureJobId: String(job._id) })).status).toBe(409);
   });
 
-  it('one evidence source per session: manual data blocks an attach, a capture blocks manual entries and manual confirm', async () => {
+  it('one evidence source per session: manual data blocks an attach, a capture blocks manual entries (and the manual submit)', async () => {
     const job = await notebookJob();
     const manual = await create({ setups: goodSetups() });
     expect((await post(`/${manual.id}/attach-capture`, { captureJobId: String(job._id) })).body.code).toBe('SOURCE_CONFLICT');
+    expect((await post(`/${manual.id}/pages`, { captureJobId: String(job._id) })).body.code).toBe('SOURCE_CONFLICT');
 
     const withCapture = await create({ captureJobId: String(job._id) });
     expect((await patch(`/${withCapture.id}`, { setups: goodSetups() })).body.code).toBe('SOURCE_CONFLICT');
-    expect((await post(`/${withCapture.id}/confirm`)).body.code).toBe('USE_CAPTURE_REVIEW');
     expect((await post(`/${withCapture.id}/submit`)).body.code).toBe('USE_CAPTURE_REVIEW');
   });
 

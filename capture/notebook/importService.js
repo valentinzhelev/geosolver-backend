@@ -44,8 +44,11 @@ function flattenErrors(notebook) {
 
 /**
  * @param {object} job a freshly loaded CaptureJob (mode 'field-notebook') - the caller verified owner + project permission
+ * @param {{guard?: (claimedJob: object) => Promise<void>}} [options] `guard` runs AFTER the claim and BEFORE any evidence is
+ *   created; if it throws, the claim is released and the confirm is refused. routes/capture.js uses it so a page that
+ *   belongs to a multi-page Field Session can only ever be confirmed through that session (see fieldSessions/service.js).
  */
-async function confirmNotebookJob(job) {
+async function confirmNotebookJob(job, { guard } = {}) {
   if (job.status === 'confirmed') {
     return { alreadyConfirmed: true, observationSetId: job.importedFieldObservationSetId ? String(job.importedFieldObservationSetId) : null, job };
   }
@@ -68,6 +71,15 @@ async function confirmNotebookJob(job) {
       return { alreadyConfirmed: true, observationSetId: fresh.importedFieldObservationSetId ? String(fresh.importedFieldObservationSetId) : null, job: fresh };
     }
     throw new CaptureError('CONFIRM_IN_PROGRESS');
+  }
+
+  if (guard) {
+    try {
+      await guard(claimed);
+    } catch (e) {
+      await CaptureJob.updateOne({ _id: claimed._id }, { $set: { confirmClaimedAt: null } }).catch(() => {});
+      throw e;
+    }
   }
 
   let setId;

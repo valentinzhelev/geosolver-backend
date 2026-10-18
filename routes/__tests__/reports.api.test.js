@@ -2,6 +2,7 @@ process.env.JWT_SECRET = 'test-secret-for-jest';
 
 jest.mock('../../models/SurveyPoint', () => require('../../tests/support/fakeCaptureModels').SurveyPoint);
 jest.mock('../../models/FieldObservationSet', () => require('../../tests/support/fakeCaptureModels').FieldObservationSet);
+jest.mock('../../models/FieldSession', () => require('../../tests/support/fakeCaptureModels').FieldSession);
 jest.mock('../../models/FieldProcessingRun', () => require('../../tests/support/fakeCaptureModels').FieldProcessingRun);
 jest.mock('../../models/Report', () => require('../../tests/support/fakeCaptureModels').Report);
 jest.mock('../../models/ReportAsset', () => require('../../tests/support/fakeCaptureModels').ReportAsset);

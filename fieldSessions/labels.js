@@ -1,4 +1,5 @@
 /** User-facing Bulgarian wording for Field Sessions (kept out of routes/service so it is testable and reusable). */
+const { pagesOf } = require('./pages');
 const SOURCE_LABELS = {
   manual: 'Ръчно въведена',
   capture: 'От снимка на полеви карнет',
@@ -35,6 +36,9 @@ function displayTitle(session) {
 }
 
 const sourceKey = (session) => (session.source && session.source.kind) || 'none';
-const sourceLabel = (session) => SOURCE_LABELS[sourceKey(session)] || SOURCE_LABELS.none;
+const sourceLabel = (session) => {
+  const n = sourceKey(session) === 'capture' ? pagesOf(session).length : 0;
+  return n > 1 ? `От снимки на полеви карнет (${n} страници)` : (SOURCE_LABELS[sourceKey(session)] || SOURCE_LABELS.none);
+};
 
 module.exports = { displayTitle, sourceLabel, sourceKey, formatDay, formatInstant, SOURCE_LABELS };

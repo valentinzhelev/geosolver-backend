@@ -17,7 +17,7 @@ const MESSAGES = {
   PROVIDER_UNAVAILABLE: 'Разпознаването временно не е възможно. Опитайте отново по-късно.',
   PREPROCESS_FAILED: 'Изображението не можа да бъде обработено.',
   NO_TABLE_DETECTED: 'Не беше открита таблица с координати. Опитайте с по-ясна снимка.',
-  NO_NOTEBOOK_DETECTED: 'Не беше разпозната поле-книжка (станция/наблюдения). Опитайте с по-ясна снимка.',
+  NO_NOTEBOOK_DETECTED: 'Не беше разпозната поле-книжка (станция/наблюдения). Опитайте с по-ясна снимка, като включите и заглавния ред на таблицата с наблюдения.',
   NOT_FOUND: 'Сканирането не е намерено.',
   INVALID_STATE: 'Действието не е възможно в текущото състояние на сканирането.',
   INVALID_REQUEST: 'Невалидна заявка.',
@@ -27,6 +27,7 @@ const MESSAGES = {
   CONFIRM_IN_PROGRESS: 'Импортирането вече се изпълнява.',
   IMPORT_FAILED: 'Импортирането не беше завършено. Нищо не е записано.',
   IMAGE_EXPIRED: 'Изображението вече не се съхранява.',
+  BELONGS_TO_SESSION: 'Страницата е част от теренна сесия. Потвърдете сесията, за да запишете данните.',
 };
 
 const STATUS = {
@@ -34,7 +35,7 @@ const STATUS = {
   NO_FILE: 400, PROJECT_REQUIRED: 400, PROJECT_FORBIDDEN: 403, QUOTA_EXCEEDED: 429, PROVIDER_NOT_CONFIGURED: 503,
   PROVIDER_UNAVAILABLE: 502, PREPROCESS_FAILED: 422, NO_TABLE_DETECTED: 422, NO_NOTEBOOK_DETECTED: 422, NOT_FOUND: 404, INVALID_STATE: 409,
   INVALID_REQUEST: 400, REVISION_CONFLICT: 409, VALIDATION_ERRORS: 422, POINT_CONFLICTS: 409, CONFIRM_IN_PROGRESS: 409,
-  IMPORT_FAILED: 500, IMAGE_EXPIRED: 404,
+  IMPORT_FAILED: 500, IMAGE_EXPIRED: 404, BELONGS_TO_SESSION: 409,
 };
 
 class CaptureError extends Error {

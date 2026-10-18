@@ -28,6 +28,8 @@ const { applyNotebookReviewEdits } = require('../capture/notebook/jobService');
 const { confirmNotebookJob } = require('../capture/notebook/importService');
 const { assertWithinQuota } = require('../capture/quota');
 const { getStorage } = require('../capture/storage');
+const FieldSession = require('../models/FieldSession');
+const { pagesOf, ownerOfJob } = require('../fieldSessions/pages');
 
 const VALID_MODES = ['coordinate-table', 'field-notebook'];
 
@@ -114,10 +116,21 @@ router.patch('/jobs/:id/cells', express.json({ limit: '256kb' }), wrap(async (re
   res.json({ success: true, data: publicJob(job) });
 }));
 
+/**
+ * A notebook page that belongs to a Field Session of TWO OR MORE pages is only ever confirmed as part of that session (one
+ * merged FieldObservationSet) - confirming one page alone would create a second, partial piece of authoritative evidence.
+ * A single-page session may still be confirmed here (the original flow). Runs before AND, via `guard`, after the claim.
+ */
+async function refuseIfSessionPage(jobId) {
+  const owner = await FieldSession.findOne(ownerOfJob(jobId));
+  if (owner && (owner.status === 'confirmed' || pagesOf(owner).length >= 2)) throw new CaptureError('BELONGS_TO_SESSION');
+}
+
 router.post('/jobs/:id/confirm', wrap(async (req, res) => {
   const { job, ctx } = await loadOwnedJob(req); // the body is ignored: the server never trusts a client-supplied table
   if (job.mode === 'field-notebook') {
-    const result = await confirmNotebookJob(job);
+    if (job.status !== 'confirmed') await refuseIfSessionPage(job._id);
+    const result = await confirmNotebookJob(job, { guard: (claimed) => refuseIfSessionPage(claimed._id) });
     return res.json({ success: true, alreadyConfirmed: result.alreadyConfirmed, observationSetId: result.observationSetId, data: publicJob(result.job) });
   }
   const result = await confirmJob(job, ctx);

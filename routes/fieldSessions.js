@@ -6,8 +6,12 @@
  *   GET    /api/field-sessions/:id                  one session: entries, review, evidence, processing, documents
  *   PATCH  /api/field-sessions/:id                  metadata and/or manual entries (draft/review only, revision-checked)
  *   POST   /api/field-sessions/:id/submit           move to "За проверка" (manual)
- *   POST   /api/field-sessions/:id/confirm          explicit, re-validated, idempotent -> immutable evidence (manual)
- *   POST   /api/field-sessions/:id/attach-capture   attach ONE Field Notebook capture as the session's source
+ *   POST   /api/field-sessions/:id/confirm          explicit, re-validated, idempotent -> ONE immutable evidence set (manual entries,
+ *                                                   or all the pages merged)
+ *   POST   /api/field-sessions/:id/attach-capture   attach ONE Field Notebook capture as the session's source (original contract)
+ *   POST   /api/field-sessions/:id/pages            add a notebook page (a Field Notebook capture) at the end or at `position`
+ *   DELETE /api/field-sessions/:id/pages/:pageId    detach a page (the capture itself is never deleted; only before confirmation)
+ *   PATCH  /api/field-sessions/:id/pages/reorder    set the page order (exactly the current pages; never re-runs OCR)
  *   POST   /api/field-sessions/:id/revise           start a NEW editable session from confirmed evidence (correction)
  *   DELETE /api/field-sessions/:id                  remove an unconfirmed session (never confirmed evidence)
  *
@@ -29,6 +33,9 @@ const { FieldSessionError, isFieldSessionError } = require('../fieldSessions/err
 const { normalizeSetups, normalizeMetadata } = require('../fieldSessions/entry');
 const { setupsToRaw } = require('../fieldSessions/revise');
 const { buildViews, confirmManualSession, manualObservationCount, isDuplicateKey } = require('../fieldSessions/service');
+const { confirmCaptureSession } = require('../fieldSessions/captureConfirm');
+const { attachPage, detachPage, reorderPages } = require('../fieldSessions/pageOps');
+const { pagesOf, pageWrite, ownerOfJob, isCaptureBacked } = require('../fieldSessions/pages');
 
 const router = express.Router();
 router.use(auth);
@@ -60,14 +67,21 @@ async function loadSession(req, minRole) {
 
 const isLocked = (session) => session.status === 'confirmed' || !!session.confirmClaimedAt;
 
-/** A capture may become a session's source only when it is this user's own Field Notebook in the same project. */
-async function resolveAttachableJob(req, projectId, captureJobId, exceptSessionId = null) {
+/**
+ * A capture may become a page of a session only when it is this user's own Field Notebook in the SAME project, not a page of
+ * another session. Every refusal for "not yours / not here" is the same CAPTURE_NOT_FOUND - nothing about someone else's
+ * capture (or another project's) is revealed.
+ * @param {{allowFailed?: boolean, rejectConfirmed?: boolean}} [opts] pages may be FAILED captures (shown retryable);
+ *   a CONFIRMED capture is never a new page (it is already evidence of its own)
+ */
+async function resolveAttachableJob(req, projectId, captureJobId, exceptSessionId = null, { allowFailed = false, rejectConfirmed = false } = {}) {
   if (!validId(captureJobId)) throw new FieldSessionError('INVALID_REQUEST');
   const job = await CaptureJob.findById(captureJobId);
   if (!job || String(job.project) !== String(projectId) || String(job.user) !== String(req.userId)) throw new FieldSessionError('CAPTURE_NOT_FOUND');
   if (job.mode !== 'field-notebook') throw new FieldSessionError('CAPTURE_NOT_NOTEBOOK');
-  if (job.status === 'failed') throw new FieldSessionError('CAPTURE_FAILED');
-  const other = await FieldSession.findOne({ 'source.captureJobId': job._id });
+  if (job.status === 'failed' && !allowFailed) throw new FieldSessionError('CAPTURE_FAILED');
+  if (job.status === 'confirmed' && rejectConfirmed) throw new FieldSessionError('CAPTURE_CONFIRMED');
+  const other = await FieldSession.findOne(ownerOfJob(job._id));
   if (other && String(other._id) !== String(exceptSessionId)) throw new FieldSessionError('CAPTURE_ALREADY_ATTACHED');
   return job;
 }
@@ -84,7 +98,9 @@ router.post('/', wrap(async (req, res) => {
   const doc = { user: req.userId, projectId: body.projectId, ...meta, status: 'draft', setups: [] };
   if (body.captureJobId !== undefined) {
     const job = await resolveAttachableJob(req, body.projectId, body.captureJobId);
+    const first = pageWrite([String(job._id)]);
     doc.source = { kind: 'capture', captureJobId: job._id };
+    doc.sources = first.sources;
   } else if (body.setups !== undefined) {
     doc.setups = normalizeSetups(body.setups);
     doc.source = { kind: 'manual' };
@@ -112,7 +128,7 @@ router.get('/', wrap(async (req, res) => {
   res.json({
     success: true,
     data: views,
-    attachedCaptureJobIds: views.filter((v) => v.capture).map((v) => v.capture.jobId),
+    attachedCaptureJobIds: [...new Set(sessions.flatMap((x) => pagesOf(x).map((p) => p.captureJobId)))],
     legacyFieldBooks: { total: books.length, active: active.length },
   });
 }));
@@ -163,8 +179,8 @@ router.post('/:id/submit', wrap(async (req, res) => {
 }));
 
 router.post('/:id/confirm', wrap(async (req, res) => {
-  const session = await loadSession(req, 'editor'); // the body is ignored: only the stored entries are ever confirmed
-  const result = await confirmManualSession(session, req.userId);
+  const session = await loadSession(req, 'editor'); // the body is ignored: only the stored entries / pages are ever confirmed
+  const result = isCaptureBacked(session) ? await confirmCaptureSession(session, req.userId) : await confirmManualSession(session, req.userId);
   res.json({ success: true, alreadyConfirmed: result.alreadyConfirmed, data: await viewOne(req, result.session) });
 }));
 
@@ -172,24 +188,47 @@ router.post('/:id/attach-capture', wrap(async (req, res) => {
   const session = await loadSession(req, 'editor');
   if (isLocked(session)) throw new FieldSessionError('SESSION_CONFIRMED');
   const job = await resolveAttachableJob(req, String(session.projectId), (req.body || {}).captureJobId, session._id);
-  if (session.source && session.source.kind === 'capture' && String(session.source.captureJobId) === String(job._id)) {
-    return res.json({ success: true, data: await viewOne(req, session) }); // idempotent
-  }
-  if (session.source && session.source.kind && !(session.source.kind === 'manual' && manualObservationCount(session.setups) === 0)) {
-    throw new FieldSessionError('SOURCE_CONFLICT');
-  }
-  let updated;
-  try {
-    updated = await FieldSession.findOneAndUpdate(
-      { _id: session._id, revision: session.revision, status: { $in: ['draft', 'review'] }, confirmClaimedAt: null },
-      { $set: { 'source.kind': 'capture', 'source.captureJobId': job._id, setups: [], status: 'draft' }, $inc: { revision: 1 } },
-      { new: true }
-    );
-  } catch (e) {
-    if (isDuplicateKey(e)) throw new FieldSessionError('CAPTURE_ALREADY_ATTACHED');
-    throw e;
-  }
-  if (!updated) throw new FieldSessionError('REVISION_CONFLICT');
+  const pages = pagesOf(session);
+  if (pages.some((p) => p.captureJobId === String(job._id))) return res.json({ success: true, data: await viewOne(req, session) }); // idempotent
+  // the original single-source contract: a session that already has a capture, or typed entries, does not silently change source
+  if (pages.length || (session.source && session.source.kind === 'manual' && manualObservationCount(session.setups) > 0)) throw new FieldSessionError('SOURCE_CONFLICT');
+  const { session: updated } = await attachPage(session, job);
+  res.json({ success: true, data: await viewOne(req, updated) });
+}));
+
+/** Optional optimistic check: a client that sends the revision it last saw is refused if the session moved on. */
+const checkRevision = (session, supplied) => {
+  if (supplied === undefined || supplied === null || supplied === '') return;
+  if (!Number.isInteger(Number(supplied)) || Number(supplied) !== session.revision) throw new FieldSessionError('REVISION_CONFLICT');
+};
+
+router.post('/:id/pages', wrap(async (req, res) => {
+  const session = await loadSession(req, 'editor');
+  if (isLocked(session)) throw new FieldSessionError('SESSION_CONFIRMED');
+  const body = req.body || {};
+  if (session.source && session.source.kind === 'manual' && manualObservationCount(session.setups) > 0) throw new FieldSessionError('SOURCE_CONFLICT');
+  if (body.position !== undefined && !(Number.isInteger(body.position) && body.position >= 0)) throw new FieldSessionError('INVALID_REQUEST');
+  checkRevision(session, body.baseRevision);
+  const job = await resolveAttachableJob(req, String(session.projectId), body.captureJobId, session._id, { allowFailed: true, rejectConfirmed: true });
+  const { session: updated } = await attachPage(session, job, { position: body.position, strict: true });
+  res.status(201).json({ success: true, data: await viewOne(req, updated) });
+}));
+
+router.patch('/:id/pages/reorder', wrap(async (req, res) => {
+  const session = await loadSession(req, 'editor');
+  if (isLocked(session)) throw new FieldSessionError('SESSION_CONFIRMED');
+  const body = req.body || {};
+  checkRevision(session, body.baseRevision);
+  const { session: updated } = await reorderPages(session, body.pageIds);
+  res.json({ success: true, data: await viewOne(req, updated) });
+}));
+
+router.delete('/:id/pages/:pageId', wrap(async (req, res) => {
+  const session = await loadSession(req, 'editor');
+  if (isLocked(session)) throw new FieldSessionError('SESSION_CONFIRMED');
+  if (!validId(req.params.pageId)) throw new FieldSessionError('PAGE_NOT_FOUND');
+  checkRevision(session, req.query && req.query.baseRevision);
+  const { session: updated } = await detachPage(session, req.params.pageId);
   res.json({ success: true, data: await viewOne(req, updated) });
 }));
 

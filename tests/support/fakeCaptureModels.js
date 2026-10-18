@@ -11,16 +11,35 @@ const clone = (v) => structuredClone(v);
 const isNil = (v) => v === null || v === undefined;
 const getPath = (o, p) => p.split('.').reduce((a, k) => (isNil(a) ? undefined : a[k]), o);
 
+/** Every value a dotted path reaches, looking INSIDE arrays like Mongo does ('sources.captureJobId' over an array of pages). */
+function valuesAt(doc, path) {
+  let cur = [doc];
+  for (const k of path.split('.')) {
+    const next = [];
+    for (const c of cur) {
+      if (isNil(c)) continue;
+      if (Array.isArray(c)) c.forEach((el) => { if (!isNil(el) && el[k] !== undefined) next.push(el[k]); });
+      else if (c[k] !== undefined) next.push(c[k]);
+    }
+    cur = next;
+  }
+  return cur.flatMap((v) => (Array.isArray(v) ? v : [v]));
+}
+
 function matches(doc, filter) {
   return Object.entries(filter).every(([key, cond]) => {
-    const v = getPath(doc, key);
+    if (key === '$or') return cond.some((f) => matches(doc, f));
+    if (key === '$and') return cond.every((f) => matches(doc, f));
+    const vs = valuesAt(doc, key);
     if (cond && typeof cond === 'object' && !(cond instanceof Date) && !Array.isArray(cond)) {
-      if ('$gte' in cond) return v >= cond.$gte;
-      if ('$exists' in cond) return cond.$exists ? v !== undefined : v === undefined;
-      if ('$in' in cond) return cond.$in.map(String).includes(String(v));
+      if ('$gte' in cond) return vs.some((v) => v >= cond.$gte);
+      if ('$lt' in cond) return vs.some((v) => !isNil(v) && v < cond.$lt);
+      if ('$exists' in cond) return cond.$exists ? vs.length > 0 : vs.length === 0;
+      if ('$in' in cond) return vs.some((v) => cond.$in.map(String).includes(String(v)));
+      if ('$ne' in cond) return isNil(cond.$ne) ? vs.some((v) => !isNil(v)) : !vs.some((v) => String(v) === String(cond.$ne));
     }
-    if (isNil(cond)) return isNil(v);
-    return String(v) === String(cond);
+    if (isNil(cond)) return vs.every(isNil);
+    return vs.some((v) => String(v) === String(cond));
   });
 }
 
@@ -97,6 +116,11 @@ const CaptureJob = {
   async updateOne(filter, update) {
     for (const [id, snap] of jobStore.rows) if (matches(snap, filter)) { Object.assign(snap, update.$set || {}); jobStore.rows.set(id, snap); return { modifiedCount: 1 }; }
     return { modifiedCount: 0 };
+  },
+  async updateMany(filter, update) {
+    let n = 0;
+    for (const [id, snap] of jobStore.rows) if (matches(snap, filter)) { Object.assign(snap, update.$set || {}); jobStore.rows.set(id, snap); n += 1; }
+    return { modifiedCount: n };
   },
   async countDocuments(filter) { return [...jobStore.rows.values()].filter((s) => matches(s, filter)).length; },
   __store: jobStore,
@@ -424,18 +448,23 @@ function setPath(obj, path, value) {
 /** Applies a Mongo-style update (`$set` with dotted paths, `$inc`) to a snapshot in place. */
 function applyUpdate(snap, update) {
   for (const [path, value] of Object.entries(update.$set || {})) setPath(snap, path, value instanceof Date ? value : clone(value));
+  for (const path of Object.keys(update.$unset || {})) { const keys = path.split('.'); const parent = keys.slice(0, -1).reduce((a, k) => (isNil(a) ? a : a[k]), snap); if (parent) delete parent[keys[keys.length - 1]]; }
   for (const [path, by] of Object.entries(update.$inc || {})) setPath(snap, path, (getPath(snap, path) || 0) + by);
   snap.updatedAt = new Date();
 }
 
+/**
+ * The two unique partial indexes of models/FieldSession.js, as MongoDB enforces them: source.captureJobId (the legacy
+ * field / page-1 mirror) and the MULTIKEY sources.captureJobId - both ACROSS documents only (a unique index never stops
+ * the same value twice inside ONE document's array, and the two indexes know nothing of each other).
+ */
 function dupCaptureAttach(snapshot, exceptId) {
+  const others = [...sessionStore.rows.values()].filter((r) => r._id !== exceptId);
+  const dup = () => { const err = new Error('E11000 duplicate key error'); err.code = 11000; return err; };
   const cj = snapshot.source && snapshot.source.captureJobId;
-  if (isNil(cj)) return;
-  if ([...sessionStore.rows.values()].some((r) => r._id !== exceptId && r.source && String(r.source.captureJobId) === String(cj))) {
-    const err = new Error('E11000 duplicate key error');
-    err.code = 11000;
-    throw err;
-  }
+  if (!isNil(cj) && others.some((r) => r.source && String(r.source.captureJobId) === String(cj))) throw dup();
+  const mine = (snapshot.sources || []).map((p) => String(p.captureJobId));
+  if (mine.length && others.some((r) => (r.sources || []).some((p) => mine.includes(String(p.captureJobId))))) throw dup();
 }
 
 const FieldSession = {
@@ -450,6 +479,7 @@ const FieldSession = {
     snap.user = String(snap.user);
     snap.projectId = String(snap.projectId);
     if (snap.source.captureJobId) snap.source.captureJobId = String(snap.source.captureJobId);
+    if (Array.isArray(snap.sources)) snap.sources = snap.sources.map((p) => ({ kind: 'capture', addedAt: now, ...p, captureJobId: String(p.captureJobId) }));
     if (snap.revisionOf) snap.revisionOf = String(snap.revisionOf);
     dupCaptureAttach(snap, snap._id);
     sessionStore.rows.set(snap._id, snap);
