@@ -134,6 +134,11 @@ function sessionLabel(session) {
   return d ? `Теренна сесия · ${d}` : 'Теренна сесия';
 }
 
+/** "Полеви карнет · страница 2" - which page of a multi-page notebook an observation was read from. */
+function pageLabel(page) {
+  return Number.isInteger(page) && page > 0 ? `Полеви карнет · страница ${page}` : 'Полеви карнет';
+}
+
 function observationSetLabel(confirmedAt) {
   const d = formatDate(confirmedAt);
   return d ? `Потвърдени теренни наблюдения · ${d}` : 'Потвърдени теренни наблюдения';
@@ -143,5 +148,5 @@ module.exports = {
   FORBIDDEN_PROVIDER_TERMS, ISSUE_CATEGORIES_CHECKED, UNKNOWN_STATE,
   CAPTURE_STATUS, CAPTURE_MODE, LEGACY_BOOK_TYPE, PROCESSING_TYPE, TRAVERSE_TYPE, TRAVERSE_STATUS,
   OBSERVATION_STATUS, REPORT_TYPE, VERTICAL_ANGLE_CONVENTION, ISSUE_KIND, CLOSURE_REASON,
-  label, reasonMessage, formatDate, formatMeasurement, pointLabel, runLabel, captureLabel, sessionLabel, observationSetLabel,
+  label, reasonMessage, formatDate, formatMeasurement, pointLabel, runLabel, captureLabel, sessionLabel, pageLabel, observationSetLabel,
 };

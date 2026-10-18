@@ -23,6 +23,7 @@ const FieldSession = require('../../models/FieldSession');
 const { publicPoint } = require('./points');
 const { summarizeRun, findRunResultForPoint } = require('./processing');
 const T = require('../terminology');
+const { ownerOfJob, pagesOf } = require('../../fieldSessions/pages');
 
 function fieldMeasurementFor(fos, runResult) {
   if (!fos || !runResult) return null;
@@ -32,6 +33,8 @@ function fieldMeasurementFor(fos, runResult) {
   const obs = setup && (setup.observations || []).find((o) => o.row === row);
   if (!obs) return null;
   return {
+    // a multi-page session's observation says which notebook PAGE it was read from (1-based); absent for manual / single-capture data
+    page: obs.source && Number.isInteger(obs.source.page) ? obs.source.page + 1 : null,
     station: setup.station ? setup.station.point : null,
     instrumentHeight: setup.station ? setup.station.instrumentHeight || null : null,
     orientationTarget: setup.orientation ? setup.orientation.target : null,
@@ -71,8 +74,15 @@ async function tracePointProvenance(projectId, pointId) {
         const job = !fromSession && fos.source && fos.source.captureJobId ? await CaptureJob.findOne({ _id: fos.source.captureJobId, project: projectId }) : null;
         const session = fromSession
           ? await FieldSession.findOne({ _id: fos.source.fieldSessionId, projectId })
-          : (job ? await FieldSession.findOne({ 'source.captureJobId': job._id, projectId }) : null);
-        if (session) chain.push({ kind: 'fieldSession', id: String(session._id), label: T.sessionLabel(session), sourceKind: session.source && session.source.kind });
+          : (job ? await FieldSession.findOne({ ...ownerOfJob(job._id), projectId }) : null);
+        if (session) {
+          const pageCount = fromSession && Array.isArray(fos.pages) ? fos.pages.length : pagesOf(session).length;
+          chain.push({
+            kind: 'fieldSession', id: String(session._id), label: T.sessionLabel(session), sourceKind: session.source && session.source.kind,
+            ...(pageCount > 1 ? { pageCount } : {}),
+            ...(pageCount > 1 && fieldMeasurement && fieldMeasurement.page ? { page: fieldMeasurement.page } : {}),
+          });
+        }
         if (job) chain.push({ kind: 'captureJob', id: String(job._id), label: T.captureLabel(job.mode, job.createdAt), mode: job.mode, fileName: (job.source && job.source.originalName) || '' });
       }
     }

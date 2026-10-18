@@ -246,7 +246,13 @@ function originSteps(prov) {
     const fos = byKind('fieldObservationSet');
     if (fos) steps.push({ 'Стъпка': 'Входни данни на обработката', 'Източник': fos.label });
     const session = byKind('fieldSession');
-    if (session) steps.push({ 'Стъпка': 'Теренна сесия', 'Източник': session.label });
+    if (session) {
+      steps.push({
+        'Стъпка': 'Теренна сесия', 'Източник': session.label,
+        ...withIf(session.pageCount, { 'Страници в сесията': `Теренната сесия съдържа ${session.pageCount} страници` }),
+        ...withIf(session.page, { 'Страница на наблюдението': T.pageLabel(session.page) }),
+      });
+    }
     const job = byKind('captureJob');
     if (job) steps.push({ 'Стъпка': 'Първоизточник', 'Източник': job.label, ...withIf(job.fileName, { 'Файл': untrusted(job.fileName, 120) }) });
   } else if (prov.originKind === 'capture') {
