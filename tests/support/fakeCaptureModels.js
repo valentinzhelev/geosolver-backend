@@ -537,6 +537,47 @@ const FieldSession = {
   __all() { return [...sessionStore.rows.values()].map(clone); },
 };
 
+/* ------------------------------------------------------------- InstrumentImport (Instrument Import V1) */
+const instrumentImportStore = makeStore('InstrumentImport');
+
+const InstrumentImport = {
+  async create(data) {
+    const now = new Date();
+    const snap = clone({ status: 'draft', ...data, _id: data._id ? String(data._id) : newId(), createdAt: now, updatedAt: now });
+    for (const k of ['user', 'projectId', 'fieldSessionId', 'lineage', 'derivedFrom']) if (!isNil(snap[k])) snap[k] = String(snap[k]);
+    instrumentImportStore.rows.set(snap._id, snap);
+    return clone(snap);
+  },
+  async findById(id) { const s = instrumentImportStore.rows.get(String(id)); return s ? clone(s) : null; },
+  findOne(filter = {}) {
+    const q = {
+      select() { return q; },
+      lean() { return q; },
+      then(res, rej) {
+        const s = [...instrumentImportStore.rows.values()].find((r) => matches(r, filter));
+        return Promise.resolve(s ? clone(s) : null).then(res, rej);
+      },
+    };
+    return q;
+  },
+  find(filter = {}) { return query(() => [...instrumentImportStore.rows.values()].filter((r) => matches(r, filter))); },
+  async updateOne(filter, update) {
+    const found = [...instrumentImportStore.rows.values()].find((r) => matches(r, filter));
+    if (!found) return { modifiedCount: 0 };
+    const next = clone(found);
+    applyUpdate(next, update);
+    instrumentImportStore.rows.set(next._id, next);
+    return { modifiedCount: 1 };
+  },
+  async deleteOne(filter) {
+    const found = [...instrumentImportStore.rows.values()].find((r) => matches(r, filter));
+    if (found) instrumentImportStore.rows.delete(found._id);
+    return { deletedCount: found ? 1 : 0 };
+  },
+  __reset() { instrumentImportStore.rows.clear(); },
+  __all() { return [...instrumentImportStore.rows.values()].map(clone); },
+};
+
 /* --------------------------------------------------------------- GaiConversation/GaiMessage (GAI V1) */
 const conversationStore = makeStore('GaiConversation');
 
@@ -637,4 +678,4 @@ function createMemoryStorage() {
   };
 }
 
-module.exports = { CaptureJob, SurveyPoint, FieldObservationSet, FieldProcessingRun, Report, ReportAsset, Calculation, FieldBook, FieldSession, GaiConversation, GaiMessage, createMemoryStorage, newId };
+module.exports = { CaptureJob, SurveyPoint, FieldObservationSet, FieldProcessingRun, Report, ReportAsset, Calculation, FieldBook, FieldSession, InstrumentImport, GaiConversation, GaiMessage, createMemoryStorage, newId };

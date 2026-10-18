@@ -3,6 +3,7 @@ const { pagesOf } = require('./pages');
 const SOURCE_LABELS = {
   manual: 'Ръчно въведена',
   capture: 'От снимка на полеви карнет',
+  instrument: 'Импорт от инструмент',
   none: 'Още няма данни',
 };
 

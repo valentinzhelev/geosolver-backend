@@ -33,6 +33,10 @@ const fieldObservationSetSchema = new mongoose.Schema(
     // each one - [{ page (0-based), captureJobId, pipelineVersion, recognitionVersion, arbitrationVersion, validationVersion }].
     // Audit/provenance data; never shown to users. Each observation also carries `source: { page, captureJobId, setup, row }`.
     pages: { type: mongoose.Schema.Types.Mixed },
+    // Instrument-import sessions only: the file this set was confirmed from - { importId, vendor, format, fileName, sha256,
+    // parserVersion, normalizerVersion, validationVersion }. Each observation also carries `source: { kind: 'instrument',
+    // record, line }` (the record's sequence number and its line in the file).
+    instrumentImport: { type: mongoose.Schema.Types.Mixed },
     // setups: [{ index, station:{point,instrumentHeight,notes}, orientation:{target,direction}|null,
     //            observations: [{row,target,hz,vz,distance,horizontalDistance,prismHeight,code,notes,cells}] }]
     // (see capture/notebook/validation.js#evaluateNotebook - `setups` is exactly its import-ready output)

@@ -27,6 +27,8 @@ const PUBLIC = {
   PAGES_NOT_READY: { status: 409, message: 'Някои страници още не са готови. Изчакайте обработката или ги премахнете.' },
   NOTHING_TO_SUBMIT: { status: 422, message: 'Добавете поне едно наблюдение, преди да изпратите за проверка.' },
   USE_CAPTURE_REVIEW: { status: 409, message: 'Тази сесия се потвърждава от прегледа на заснемането.' },
+  INSTRUMENT_IMPORT_MISSING: { status: 404, message: 'Импортираният файл от инструмент не е намерен в тази сесия.' },
+  INVALID_DECISION: { status: 400, message: 'Изборът в прегледа на импорта е невалиден.' },
 };
 
 class FieldSessionError extends Error {

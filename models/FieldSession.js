@@ -39,11 +39,17 @@ const fieldSessionSchema = new mongoose.Schema(
     angleUnit: { type: String, enum: ['gon', 'deg'], default: 'gon' },
 
     source: {
-      kind: { type: String, enum: ['manual', 'capture', null], default: null },
+      // 'instrument': an imported instrument file (V1: Leica GSI) - see models/InstrumentImport.js and fieldSessions/instrumentOps.js
+      kind: { type: String, enum: ['manual', 'capture', 'instrument', null], default: null },
       // LEGACY single-capture field. For capture-backed sessions it is only a MIRROR of page 1 (kept in step by every page
       // operation, see fieldSessions/pages.js) so older readers keep working; `sources` is the authority when present.
       captureJobId: { type: mongoose.Schema.Types.ObjectId, ref: 'CaptureJob' },
+      instrumentImportId: { type: mongoose.Schema.Types.ObjectId, ref: 'InstrumentImport' }, // instrument source only
     },
+    // instrument source only: the user's explicit review decisions { excluded: [seq], orientation: { setupKey: seq|null },
+    // orphanStation: { point, instrumentHeight } | null } (see instrumentImport/leica/gsiNormalize.js). Revision-checked like
+    // manual entries; frozen once confirmed.
+    instrumentDecisions: { type: mongoose.Schema.Types.Mixed },
     // Notebook pages, in page order. ABSENT (undefined, not []) on records written before multi-page sessions: such a
     // record is read as one page via fieldSessions/pages.js#pagesOf - no rewrite is required for it to keep working.
     // Every change is a compare-and-set of this whole array on the session document (revision + lock in the filter).

@@ -22,6 +22,9 @@ const { FieldSessionError } = require('./errors');
 const { pagesOf, isCaptureBacked } = require('./pages');
 const { mergePages } = require('./pageMerge');
 const { evaluateNotebook } = require('../capture/notebook/validation');
+const { reviewInstrumentImport } = require('../instrumentImport');
+const { ISSUES: INSTRUMENT_ISSUES } = require('../instrumentImport/errors');
+const { loadInstrumentContext, instrumentSourceLabel, VENDOR_LABEL } = require('./instrumentOps');
 const { getConfig: getCaptureConfig } = require('../capture/config');
 
 const isDuplicateKey = (e) => e && (e.code === 11000 || (e.writeErrors && e.writeErrors.some((w) => w.code === 11000)));
@@ -101,16 +104,32 @@ async function loadContext(projectId, sessions) {
   const revisions = sessions.length ? await FieldSession.find({ projectId, revisionOf: { $in: ids(sessions.map((s) => s._id)) } }).select('revisionOf').lean() : [];
   const revisedIds = new Set(revisions.map((r) => String(r.revisionOf)));
 
-  // station/orientation reference warnings for editable manual sessions: ONE project-points query for the whole build,
-  // so the list and the detail always agree on a session's issue counts
-  const editable = sessions.filter((s) => s.source && s.source.kind === 'manual' && s.status !== 'confirmed');
+  // instrument imports: the stored snapshot, re-read with the session's decisions (the same function the confirm runs)
+  const { importBySession, duplicateIds } = await loadInstrumentContext(projectId, sessions);
+  const instrumentReviewBySession = new Map();
+  for (const s of sessions) {
+    const imp = importBySession.get(String(s._id));
+    if (!imp || s.status === 'confirmed') continue;
+    try {
+      instrumentReviewBySession.set(String(s._id), reviewInstrumentImport(imp, s.instrumentDecisions || {}));
+    } catch {
+      instrumentReviewBySession.set(String(s._id), null); // a stored import beyond today's limits: shown as unavailable, never guessed
+    }
+  }
+
+  // station/orientation reference warnings for editable manual and instrument sessions: ONE project-points query for the whole
+  // build, so the list and the detail always agree on a session's issue counts
+  const editable = sessions.filter((s) => s.source && s.status !== 'confirmed' && (s.source.kind === 'manual' || instrumentReviewBySession.get(String(s._id))));
   const referenceBySession = new Map();
   if (editable.length) {
     const points = await SurveyPoint.find({ projectId }).select('name x y').lean();
-    for (const s of editable) referenceBySession.set(String(s._id), referenceIssues(s.setups || [], points));
+    for (const s of editable) {
+      const review = instrumentReviewBySession.get(String(s._id));
+      referenceBySession.set(String(s._id), referenceIssues(review ? review.setups : (s.setups || []), points));
+    }
   }
 
-  return { jobById, jobsOf, mergeBySession, fosIdOf, fosById, runsByFos, reportsByRun, revisedIds, referenceBySession };
+  return { jobById, jobsOf, mergeBySession, fosIdOf, fosById, runsByFos, reportsByRun, revisedIds, referenceBySession, importBySession, duplicateIds, instrumentReviewBySession };
 }
 
 /** The FIRST page, in the shape older clients read (a one-capture session). New clients read `pages`. */
@@ -173,6 +192,25 @@ function logicalView(merge) {
   };
 }
 
+/** The instrument block of a session view. No internal ids: the client addresses everything through the session. */
+function instrumentView(imp, review, duplicate, session) {
+  if (!imp) return { available: false, vendor: null, vendorLabel: null, format: null, fileName: null, bytes: 0, uploadedAt: null, duplicate: false, review: null, decisions: null };
+  return {
+    available: true,
+    vendor: imp.vendor,
+    vendorLabel: VENDOR_LABEL[imp.vendor] || null,
+    format: imp.format,
+    fileName: imp.originalName || '',
+    bytes: imp.bytes || 0,
+    uploadedAt: imp.createdAt || null,
+    duplicate,
+    versions: { parser: imp.parserVersion, normalizer: imp.normalizerVersion, validation: imp.validationVersion },
+    review: review ? { summary: review.summary, setups: review.setups, records: review.records } : null,
+    reviewUnavailable: session.status !== 'confirmed' && !review,
+    decisions: session.instrumentDecisions || { excluded: [], orientation: {}, orphanStation: null },
+  };
+}
+
 /** One session -> its user-facing view. `detail` adds the heavy parts (raw setups, evaluation, runs, options). */
 function toView(session, ctx, { userId, detail = false }) {
   const extraIssues = ctx.referenceBySession.get(String(session._id)) || [];
@@ -184,6 +222,9 @@ function toView(session, ctx, { userId, detail = false }) {
   const derived = deriveStatus({ session, jobs, runCount: runs.length });
   const kind = sourceKey(session);
   const pages = pagesOf(session);
+  const instrumentImport = kind === 'instrument' ? ctx.importBySession.get(String(session._id)) || null : null;
+  const instrumentReview = instrumentImport ? ctx.instrumentReviewBySession.get(String(session._id)) || null : null;
+  const instrumentDuplicate = !!instrumentImport && ctx.duplicateIds.has(String(instrumentImport._id));
 
   let setupCount = 0;
   let observationCount = 0;
@@ -203,6 +244,14 @@ function toView(session, ctx, { userId, detail = false }) {
     observationCount = merge.summary.observations;
     issues = { errors: merge.summary.errors, warnings: merge.summary.warnings };
     evaluation = { summary: { setups: merge.summary.setups, observations: merge.summary.observations, errors: merge.summary.errors, warnings: merge.summary.warnings, canConfirm: merge.summary.canConfirm, pages: merge.summary.pages }, issues: merge.issues };
+  } else if (kind === 'instrument' && instrumentReview) {
+    const dup = instrumentDuplicate ? [{ severity: 'warning', code: 'DUPLICATE_FILE', message: INSTRUMENT_ISSUES.DUPLICATE_FILE, record: null, line: null, setup: null, setupKey: null }] : [];
+    const all = [...dup, ...instrumentReview.issues];
+    const errors = all.filter((i) => i.severity === 'error').length;
+    setupCount = instrumentReview.summary.setups;
+    observationCount = instrumentReview.summary.observations;
+    issues = { errors, warnings: all.length - errors + extraIssues.length };
+    evaluation = { summary: { setups: setupCount, observations: observationCount, errors, warnings: all.length - errors, canConfirm: instrumentReview.summary.canConfirm }, issues: all };
   }
 
   const reportList = runs.flatMap((r) => ctx.reportsByRun.get(String(r._id)) || []);
@@ -218,7 +267,7 @@ function toView(session, ctx, { userId, detail = false }) {
     operator: session.operator || '',
     instrument: session.instrument || '',
     source: kind,
-    sourceLabel: sourceLabel(session),
+    sourceLabel: kind === 'instrument' ? instrumentSourceLabel(instrumentImport) : sourceLabel(session),
     status: derived.status,
     statusLabel: derived.label,
     confirmed: derived.confirmed,
@@ -259,8 +308,12 @@ function toView(session, ctx, { userId, detail = false }) {
       return pageView(p, job, merge && merge.pages.find((v) => v.order === p.order), userId, confirmedObs);
     }),
     logical: merge ? logicalView(merge) : null,
+    // instrument-import sessions: the file (display name, format) and - while unconfirmed - the review: setups with the record
+    // each value came from, every record of the file (raw + decoded words), and the user's current decisions
+    // (`instrument` is the session's instrument NAME metadata - this is the imported file)
+    instrumentImport: kind === 'instrument' ? instrumentView(instrumentImport, instrumentReview, instrumentDuplicate, session) : null,
     // confirmed evidence, typed, without OCR cell geometry or internal ids (a merged observation says which PAGE it came from)
-    evidence: fos ? { setups: (fos.setups || []).map((st) => ({ ...st, observations: (st.observations || []).map(({ cells, source, ...o }) => ({ ...o, ...(source && Number.isInteger(source.page) ? { page: source.page + 1 } : {}) })) })) } : null,
+    evidence: fos ? { setups: (fos.setups || []).map((st) => ({ ...st, observations: (st.observations || []).map(({ cells, source, ...o }) => ({ ...o, ...(source && Number.isInteger(source.page) ? { page: source.page + 1 } : {}), ...(source && source.kind === 'instrument' ? { fileLine: source.line } : {}) })) })) } : null,
     processingOptions: fos ? processingOptions(fos.setups) : null,
     runs: runs.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map((r) => ({
       id: String(r._id),

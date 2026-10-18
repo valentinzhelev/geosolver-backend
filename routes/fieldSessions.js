@@ -12,6 +12,9 @@
  *   POST   /api/field-sessions/:id/pages            add a notebook page (a Field Notebook capture) at the end or at `position`
  *   DELETE /api/field-sessions/:id/pages/:pageId    detach a page (the capture itself is never deleted; only before confirmation)
  *   PATCH  /api/field-sessions/:id/pages/reorder    set the page order (exactly the current pages; never re-runs OCR)
+ *   POST   /api/field-sessions/:id/instrument-import   upload an instrument file (Leica GSI-8 / GSI-16) as the session's source
+ *   PATCH  /api/field-sessions/:id/instrument-import   the review decisions (orientation per setup, excluded records, station)
+ *   DELETE /api/field-sessions/:id/instrument-import   remove the file before confirmation (the import record is kept, detached)
  *   POST   /api/field-sessions/:id/revise           start a NEW editable session from confirmed evidence (correction)
  *   DELETE /api/field-sessions/:id                  remove an unconfirmed session (never confirmed evidence)
  *
@@ -22,6 +25,7 @@
  * server-side, and the observation set a confirm creates is built from the stored entries only.
  */
 const express = require('express');
+const multer = require('multer');
 const mongoose = require('mongoose');
 const auth = require('../middleware/auth');
 const { getProjectAccess, hasMinRole } = require('../utils/workspaceAccess');
@@ -36,13 +40,22 @@ const { buildViews, confirmManualSession, manualObservationCount, isDuplicateKey
 const { confirmCaptureSession } = require('../fieldSessions/captureConfirm');
 const { attachPage, detachPage, reorderPages } = require('../fieldSessions/pageOps');
 const { pagesOf, pageWrite, ownerOfJob, isCaptureBacked } = require('../fieldSessions/pages');
+const {
+  importInstrumentFile, updateInstrumentDecisions, detachInstrumentImport, confirmInstrumentSession, reviseInstrumentSession,
+} = require('../fieldSessions/instrumentOps');
+const { InstrumentImportError, isInstrumentImportError } = require('../instrumentImport/errors');
+const { getConfig: getImportConfig } = require('../instrumentImport/config');
 
 const router = express.Router();
 router.use(auth);
 router.use(express.json({ limit: '512kb' }));
 
+// instrument files: memory only (never written to disk, never a path), one file, a handful of fields
+const instrumentUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: getImportConfig().limits.maxBytes, files: 1, fields: 4, parts: 6 } });
+
 const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => {
   if (isFieldSessionError(e)) return res.status(e.status).json({ success: false, code: e.code, message: e.message, ...e.extra });
+  if (isInstrumentImportError(e)) return res.status(e.status).json({ success: false, code: e.code, message: e.message });
   console.error('field-sessions: unexpected error', { name: e && e.name }); // never the message/content
   return res.status(500).json({ success: false, code: 'INTERNAL', message: 'Грешка.' });
 });
@@ -145,7 +158,7 @@ router.patch('/:id', wrap(async (req, res) => {
 
   const $set = normalizeMetadata(body);
   if (body.setups !== undefined) {
-    if (session.source && session.source.kind === 'capture') throw new FieldSessionError('SOURCE_CONFLICT');
+    if (session.source && (session.source.kind === 'capture' || session.source.kind === 'instrument')) throw new FieldSessionError('SOURCE_CONFLICT');
     $set.setups = normalizeSetups(body.setups);
     $set['source.kind'] = 'manual';
   }
@@ -168,7 +181,8 @@ router.post('/:id/submit', wrap(async (req, res) => {
   const session = await loadSession(req, 'editor');
   if (isLocked(session)) throw new FieldSessionError('SESSION_CONFIRMED');
   if (session.source && session.source.kind === 'capture') throw new FieldSessionError('USE_CAPTURE_REVIEW');
-  if (manualObservationCount(session.setups) === 0) throw new FieldSessionError('NOTHING_TO_SUBMIT');
+  const isInstrument = session.source && session.source.kind === 'instrument';
+  if (!isInstrument && manualObservationCount(session.setups) === 0) throw new FieldSessionError('NOTHING_TO_SUBMIT');
   const updated = await FieldSession.findOneAndUpdate(
     { _id: session._id, status: { $in: ['draft', 'review'] }, confirmClaimedAt: null },
     { $set: { status: 'review' }, $inc: { revision: 1 } },
@@ -180,18 +194,22 @@ router.post('/:id/submit', wrap(async (req, res) => {
 
 router.post('/:id/confirm', wrap(async (req, res) => {
   const session = await loadSession(req, 'editor'); // the body is ignored: only the stored entries / pages are ever confirmed
-  const result = isCaptureBacked(session) ? await confirmCaptureSession(session, req.userId) : await confirmManualSession(session, req.userId);
+  const kind = session.source && session.source.kind;
+  const result = isCaptureBacked(session)
+    ? await confirmCaptureSession(session, req.userId)
+    : kind === 'instrument' ? await confirmInstrumentSession(session, req.userId) : await confirmManualSession(session, req.userId);
   res.json({ success: true, alreadyConfirmed: result.alreadyConfirmed, data: await viewOne(req, result.session) });
 }));
 
 router.post('/:id/attach-capture', wrap(async (req, res) => {
   const session = await loadSession(req, 'editor');
   if (isLocked(session)) throw new FieldSessionError('SESSION_CONFIRMED');
+  if (session.source && session.source.kind === 'instrument') throw new FieldSessionError('SOURCE_CONFLICT');
   const job = await resolveAttachableJob(req, String(session.projectId), (req.body || {}).captureJobId, session._id);
   const pages = pagesOf(session);
   if (pages.some((p) => p.captureJobId === String(job._id))) return res.json({ success: true, data: await viewOne(req, session) }); // idempotent
   // the original single-source contract: a session that already has a capture, or typed entries, does not silently change source
-  if (pages.length || (session.source && session.source.kind === 'manual' && manualObservationCount(session.setups) > 0)) throw new FieldSessionError('SOURCE_CONFLICT');
+  if (pages.length || (session.source && session.source.kind === 'instrument') || (session.source && session.source.kind === 'manual' && manualObservationCount(session.setups) > 0)) throw new FieldSessionError('SOURCE_CONFLICT');
   const { session: updated } = await attachPage(session, job);
   res.json({ success: true, data: await viewOne(req, updated) });
 }));
@@ -207,6 +225,7 @@ router.post('/:id/pages', wrap(async (req, res) => {
   if (isLocked(session)) throw new FieldSessionError('SESSION_CONFIRMED');
   const body = req.body || {};
   if (session.source && session.source.kind === 'manual' && manualObservationCount(session.setups) > 0) throw new FieldSessionError('SOURCE_CONFLICT');
+  if (session.source && session.source.kind === 'instrument') throw new FieldSessionError('SOURCE_CONFLICT');
   if (body.position !== undefined && !(Number.isInteger(body.position) && body.position >= 0)) throw new FieldSessionError('INVALID_REQUEST');
   checkRevision(session, body.baseRevision);
   const job = await resolveAttachableJob(req, String(session.projectId), body.captureJobId, session._id, { allowFailed: true, rejectConfirmed: true });
@@ -232,6 +251,47 @@ router.delete('/:id/pages/:pageId', wrap(async (req, res) => {
   res.json({ success: true, data: await viewOne(req, updated) });
 }));
 
+/**
+ * Instrument file upload. Session state is checked BEFORE the file is read (a locked or conflicting session never has its
+ * upload parsed); the file itself is untrusted text - see instrumentImport/text.js. A file-level refusal (not GSI, ambiguous,
+ * binary, too large...) stores nothing and answers with its fixed Bulgarian message.
+ */
+router.post('/:id/instrument-import', (req, res, next) => {
+  instrumentUpload.single('file')(req, res, (err) => {
+    if (!err) return next();
+    const e = err.code === 'LIMIT_FILE_SIZE' ? new InstrumentImportError('FILE_TOO_LARGE') : new FieldSessionError('INVALID_REQUEST');
+    return res.status(e.status).json({ success: false, code: e.code, message: e.message });
+  });
+}, wrap(async (req, res) => {
+  const session = await loadSession(req, 'editor');
+  if (isLocked(session)) throw new FieldSessionError('SESSION_CONFIRMED');
+  const kind = session.source && session.source.kind;
+  if (kind === 'capture' || kind === 'instrument' || pagesOf(session).length) throw new FieldSessionError('SOURCE_CONFLICT');
+  if (kind === 'manual' && manualObservationCount(session.setups) > 0) throw new FieldSessionError('SOURCE_CONFLICT');
+  checkRevision(session, req.body && req.body.baseRevision);
+  if (!req.file || !req.file.buffer) throw new InstrumentImportError('NO_FILE');
+  const updated = await importInstrumentFile(session, req.file, req.userId);
+  res.status(201).json({ success: true, data: await viewOne(req, updated) });
+}));
+
+router.patch('/:id/instrument-import', wrap(async (req, res) => {
+  const session = await loadSession(req, 'editor');
+  if (isLocked(session)) throw new FieldSessionError('SESSION_CONFIRMED');
+  if (!session.source || session.source.kind !== 'instrument') throw new FieldSessionError('INSTRUMENT_IMPORT_MISSING');
+  const body = req.body || {};
+  const updated = await updateInstrumentDecisions(session, body.decisions, body.baseRevision);
+  res.json({ success: true, data: await viewOne(req, updated) });
+}));
+
+router.delete('/:id/instrument-import', wrap(async (req, res) => {
+  const session = await loadSession(req, 'editor');
+  if (isLocked(session)) throw new FieldSessionError('SESSION_CONFIRMED');
+  if (!session.source || session.source.kind !== 'instrument') throw new FieldSessionError('INSTRUMENT_IMPORT_MISSING');
+  checkRevision(session, req.query && req.query.baseRevision);
+  const updated = await detachInstrumentImport(session);
+  res.json({ success: true, data: await viewOne(req, updated) });
+}));
+
 router.post('/:id/revise', wrap(async (req, res) => {
   const session = await loadSession(req, 'editor');
   const [view] = await buildViews(String(session.projectId), [session], { userId: req.userId, detail: true });
@@ -239,12 +299,21 @@ router.post('/:id/revise', wrap(async (req, res) => {
   const fos = await FieldObservationSet.findOne({ _id: view.observationSetId, projectId: session.projectId });
   if (!fos) throw new FieldSessionError('NOT_CONFIRMED');
 
-  const created = await FieldSession.create({
-    user: req.userId,
-    projectId: session.projectId,
+  const fields = {
     title: `${view.title} (ревизия)`.slice(0, 120),
     date: session.date, operator: session.operator, instrument: session.instrument, instrumentSerial: session.instrumentSerial,
     conditions: session.conditions, notes: session.notes, angleUnit: session.angleUnit,
+  };
+  if (session.source && session.source.kind === 'instrument') {
+    // a correction of an imported file re-reads the same file (full instrument resolution), it is never retyped
+    const revised = await reviseInstrumentSession(session, fields, req.userId);
+    return res.status(201).json({ success: true, data: await viewOne(req, revised) });
+  }
+
+  const created = await FieldSession.create({
+    user: req.userId,
+    projectId: session.projectId,
+    ...fields,
     source: { kind: 'manual' },
     status: 'draft',
     setups: normalizeSetups(setupsToRaw(fos.setups)),
