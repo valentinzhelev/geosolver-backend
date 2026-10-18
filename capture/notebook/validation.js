@@ -34,6 +34,7 @@ const MESSAGES = {
   RECOGNITION_INVALID: 'Разпознаването не изглежда надеждно - въведете стойността ръчно.',
   RECOGNITION_REVIEW_SUGGESTED: 'Има разминаване между няколко разчитания на тази клетка - проверете стойността.',
   NO_OBSERVATIONS: 'Не са намерени наблюдения.',
+  UNASSIGNED_ROWS: 'В страницата има редове, които не са отнесени към станция, защото липсва заглавен ред на таблицата. Проверете снимката – те не са включени.',
 };
 
 const effectiveText = (cell) => (cell && cell.userValue !== null && cell.userValue !== undefined ? String(cell.userValue) : (cell ? cell.rawText || '' : ''));
@@ -124,7 +125,11 @@ const fieldAt = (row, field) => (row.cols.find((c) => c.field === field) ? row.c
 
 /**
  * @param {object} notebook reconstructed notebook (see capture/notebook/reconstruct.js)
- * @param {{confidenceThreshold?: number, arbitration?: object}} options
+ * @param {{confidenceThreshold?: number, arbitration?: object, allowContinuation?: boolean}} options
+ *   `allowContinuation` (multi-page Field Sessions only): a LEADING setup that the reconstruction marked `continuation` and
+ *   whose station is still blank is NOT an error here - it is the rest of the previous page's station, which the
+ *   session-level merge (fieldSessions/pageMerge.js) attaches or rejects. Default false: a page evaluated on its own
+ *   (the Capture review) reports that blank station exactly as before (STATION_REQUIRED).
  * @returns {{notebook: object, summary: object, setups: object[]}} `setups` is the import-ready structure (only
  *   meaningful when summary.canConfirm)
  */
@@ -138,7 +143,11 @@ function evaluateNotebook(notebook, options = {}) {
   for (const setup of nb.setups) {
     setup.issues = [];
 
-    const stationName = evaluateIdentifierField(setup.station.point, { required: true, code: 'STATION_REQUIRED', thresholds });
+    // a station typed in by the reviewer makes it an ordinary setup again
+    const continuation = !!options.allowContinuation && setup.continuation === true && isBlank(effectiveText(setup.station.point));
+    let stationName = null;
+    if (continuation) resetCell(setup.station.point);
+    else stationName = evaluateIdentifierField(setup.station.point, { required: true, code: 'STATION_REQUIRED', thresholds });
     const hi = evaluateMeasurementField(setup.station.instrumentHeight, { required: false, columnStyle: null, thresholds });
     evaluateIdentifierField(setup.station.notes, { required: false, thresholds: {} });
 
@@ -240,7 +249,7 @@ function evaluateNotebook(notebook, options = {}) {
     }
 
     // ---- setup-level summary ---------------------------------------------------------------------------------
-    if (importObservations.length && !setup.orientation) setup.issues.push(issue('MISSING_ORIENTATION', 'warning', MESSAGES.MISSING_ORIENTATION));
+    if (importObservations.length && !setup.orientation && !continuation) setup.issues.push(issue('MISSING_ORIENTATION', 'warning', MESSAGES.MISSING_ORIENTATION));
     for (const is of setup.issues) {
       if (is.severity === 'error') summary.tableErrors += 1;
       else summary.tableWarnings += 1;
@@ -285,6 +294,7 @@ function evaluateNotebook(notebook, options = {}) {
       index: setup.index,
       station: { point: stationName, instrumentHeight: hi, notes: setup.station.notes.normalizedValue || '' },
       orientation: orientationOut,
+      ...(continuation ? { continuation: true } : {}),
       observations: setupImportRows,
     });
 
@@ -297,6 +307,7 @@ function evaluateNotebook(notebook, options = {}) {
   }
 
   if (summary.observations === 0) nb.issues.push(issue('NO_OBSERVATIONS', 'error', MESSAGES.NO_OBSERVATIONS));
+  if (nb.unassignedRows > 0) nb.issues.push(issue('UNASSIGNED_ROWS', 'warning', MESSAGES.UNASSIGNED_ROWS, { count: nb.unassignedRows }));
   for (const is of nb.issues) {
     if (is.severity === 'error') summary.tableErrors += 1;
     else summary.tableWarnings += 1;

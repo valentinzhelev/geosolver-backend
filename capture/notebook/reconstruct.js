@@ -14,7 +14,12 @@
  *      and merged into the setup's station/orientation fields - this supports both "Ст. T1  i 1.450" on one line
  *      and split across several lines, without guessing which layout a given photo used;
  *   5. once a header is found, observation rows use the SAME column-interval cell assignment as coordinate tables
- *      (capture/reconstruct.js's columnIntervals/nearestColumn), reused as-is.
+ *      (capture/reconstruct.js's columnIntervals/nearestColumn), reused as-is;
+ *   6. multi-page notebooks: an observation table header that appears BEFORE any station line (a page that continues
+ *      the previous page's station) opens a LEADING CONTINUATION setup (`continuation: true`, empty station fields).
+ *      Whether it really continues a station is decided at session level (fieldSessions/pageMerge.js), never here -
+ *      a single page cannot know. Data-looking rows before any station AND without a header cannot be assigned to a
+ *      column layout: they are counted in `notebook.unassignedRows` (a review warning), never silently dropped.
  *
  * Every field is built with capture/reconstruct.js#buildCandidateCell - the exact same "candidate cell" shape
  * coordinate-table cells use, so bounded re-recognition and arbitration (capture/rerecognition.js,
@@ -27,6 +32,11 @@ const { mapLabel, labelHits } = require('./headers');
 const cx = (b) => b.x + b.w / 2;
 
 const KEY_OBSERVATION_FIELDS = ['target', 'hz', 'vz', 'distance'];
+
+// a token that reads as a measurement value (an angle/distance/height), used only to tell a stray observation ROW from
+// a title line when no column layout exists for it
+const NUMERIC_TOKEN = /^[+-]?\d+(?:[.,]\d+)?(?:g|gon|°|º|m|cm|mm)?$/i;
+const looksLikeObservationRow = (line) => line.words.length >= 3 && line.words.filter((w) => NUMERIC_TOKEN.test(String(w.text).trim())).length >= 2;
 
 function classifyLine(line) {
   const { fields } = labelHits(line.words.map((w) => w.text));
@@ -98,9 +108,10 @@ function reconstructNotebook(page, options = {}) {
     pendingSegments = [];
   };
   const emptyField = (line) => buildCandidateCell([], { col: 0, page: page.index, providerName, emptyBbox: { x: line.bbox.x, y: line.bbox.y, w: 1, h: line.bbox.h } });
-  const startSetup = (line) => {
+  let unassignedRows = 0;
+  const startSetup = (line, extra = {}) => {
     flushPending();
-    current = { index: setups.length, station: { point: emptyField(line), instrumentHeight: emptyField(line), notes: emptyField(line), bbox: line.bbox }, orientation: null, observations: [], issues: [] };
+    current = { index: setups.length, station: { point: emptyField(line), instrumentHeight: emptyField(line), notes: emptyField(line), bbox: line.bbox }, orientation: null, observations: [], issues: [], ...extra };
     setups.push(current);
     headerCols = null;
   };
@@ -112,7 +123,21 @@ function reconstructNotebook(page, options = {}) {
       pendingSegments.push(...splitLabelledLine(line.words));
       continue;
     }
-    if (!current) continue; // nothing recognisable before the first station: not part of any setup (e.g. a title)
+    if (!current) {
+      if (kind === 'header') {
+        // a table with no station line above it: see the module doc, point 6. Only when it actually has rows - a lone
+        // header line is not a recognisable notebook (NO_STATION_DETECTED, exactly as before multi-page support).
+        let hasRows = false;
+        for (let j = i + 1; j < classified.length && classified[j].kind !== 'station'; j += 1) {
+          if (classified[j].kind === 'data' && classified[j].line.words.length >= 2) { hasRows = true; break; }
+        }
+        if (!hasRows) continue;
+        startSetup(line, { continuation: true });
+      } else {
+        if (kind === 'data' && looksLikeObservationRow(line)) unassignedRows += 1; // observation-looking, but no layout to read it with
+        continue; // otherwise a title / label line before the first station: not part of any setup
+      }
+    }
 
     if (kind === 'orientation') {
       pendingSegments.push(...splitLabelledLine(line.words));
@@ -182,7 +207,7 @@ function reconstructNotebook(page, options = {}) {
   if (!setups.length) return { notebook: null, reason: 'NO_STATION_DETECTED' };
 
   return {
-    notebook: { pageIndex: page.index, setups, issues: [] },
+    notebook: { pageIndex: page.index, setups, issues: [], ...(unassignedRows ? { unassignedRows } : {}) },
     diagnostics: { lines: lines.length, setups: setups.length },
   };
 }

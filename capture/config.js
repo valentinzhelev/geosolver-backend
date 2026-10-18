@@ -17,7 +17,8 @@ function getConfig() {
     validationVersion: 'capture-validate-2.2.0',
     // V2.3: Field Notebook mode versions, tracked separately from the coordinate-table ones above (a job's mode
     // decides which versions are meaningful; see models/CaptureJob.js).
-    notebookReconstructionVersion: 'capture-notebook-reconstruct-1.0.0',
+    // 1.1.0: a table header with rows but no station line opens a leading continuation setup (multi-page notebooks)
+    notebookReconstructionVersion: 'capture-notebook-reconstruct-1.1.0',
     notebookValidationVersion: 'capture-notebook-validate-1.0.0',
     maxBytes: int('CAPTURE_MAX_BYTES', 8 * 1024 * 1024),
     maxPixels: int('CAPTURE_MAX_PIXELS', 40 * 1000 * 1000), // decoded-size guard (pixel bomb protection)

@@ -38,6 +38,9 @@ function placeTokens(tokens, y, confidence) {
 /**
  * @param {{setups: {
  *   station: string, hi?: string, orientationTarget?: string, orientationDirection?: string,
+ *   continuation?: boolean,   // multi-page: NO station/orientation lines - just the table header and rows (a page that
+ *                             // continues the previous page's station)
+ *   headerless?: boolean,     // multi-page edge case: the rows WITHOUT their table header line
  *   observations: {target: string, hz: string, vz: string, distance: string, prism?: string}[],
  *   confidence?: (rowIndex:number, field:string) => number,
  * }[]}} spec
@@ -49,23 +52,7 @@ function layoutNotebook(spec) {
   let maxX = 0;
   const advance = (n = 1) => { y += ROW_H * n; };
 
-  for (const setup of spec.setups) {
-    const stationTokens = ['Ст.', setup.station];
-    if (setup.hi !== undefined) stationTokens.push('i', setup.hi);
-    const st = placeTokens(stationTokens, y, setup.confidence && setup.confidence(-1, 'station'));
-    words.push(...st.words);
-    maxX = Math.max(maxX, st.endX);
-    advance();
-
-    if (setup.orientationTarget !== undefined) {
-      const oTokens = ['Ориентир', setup.orientationTarget];
-      if (setup.orientationDirection !== undefined) oTokens.push(setup.orientationDirection);
-      const ot = placeTokens(oTokens, y, setup.confidence && setup.confidence(-1, 'orientation'));
-      words.push(...ot.words);
-      maxX = Math.max(maxX, ot.endX);
-      advance();
-    }
-
+  function layoutObservationTable(setup) {
     const rows = setup.observations.map((o) => [o.target, o.hz, o.vz, o.distance, o.prism ?? '']);
     const colChars = OBS_HEADERS.map((h, c) => Math.max(String(h).length, ...rows.map((r) => String(r[c] ?? '').length), 3));
     const colX = [];
@@ -76,8 +63,10 @@ function layoutNotebook(spec) {
     }
     maxX = Math.max(maxX, x);
 
-    OBS_HEADERS.forEach((h, c) => words.push({ text: h, confidence: 0.98, bbox: { x: colX[c], y, w: h.length * CHAR_W, h: WORD_H } }));
-    advance();
+    if (!setup.headerless) {
+      OBS_HEADERS.forEach((h, c) => words.push({ text: h, confidence: 0.98, bbox: { x: colX[c], y, w: h.length * CHAR_W, h: WORD_H } }));
+      advance();
+    }
 
     rows.forEach((row, r) => {
       row.forEach((cellText, c) => {
@@ -94,6 +83,31 @@ function layoutNotebook(spec) {
       });
       advance();
     });
+  }
+
+
+  for (const setup of spec.setups) {
+    if (setup.continuation) {
+      layoutObservationTable(setup);
+      continue;
+    }
+    const stationTokens = ['Ст.', setup.station];
+    if (setup.hi !== undefined) stationTokens.push('i', setup.hi);
+    const st = placeTokens(stationTokens, y, setup.confidence && setup.confidence(-1, 'station'));
+    words.push(...st.words);
+    maxX = Math.max(maxX, st.endX);
+    advance();
+
+    if (setup.orientationTarget !== undefined) {
+      const oTokens = ['Ориентир', setup.orientationTarget];
+      if (setup.orientationDirection !== undefined) oTokens.push(setup.orientationDirection);
+      const ot = placeTokens(oTokens, y, setup.confidence && setup.confidence(-1, 'orientation'));
+      words.push(...ot.words);
+      maxX = Math.max(maxX, ot.endX);
+      advance();
+    }
+
+    layoutObservationTable(setup);
   }
 
   return { words, width: Math.round(maxX + PAD_X), height: Math.round(y + 40) };
