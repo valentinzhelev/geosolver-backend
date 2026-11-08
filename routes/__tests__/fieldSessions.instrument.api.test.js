@@ -78,7 +78,7 @@ describe('upload and review', () => {
     const cases = [
       [GSI.NOT_GSI, 422, 'UNSUPPORTED_FORMAT', 'Форматът не е разпознат.'],
       [GSI.L_MIXED_MARKERS, 422, 'AMBIGUOUS_GSI_FORMAT'],
-      [GSI.L_SIXTEEN_WITHOUT_MARKER, 422, 'AMBIGUOUS_GSI_FORMAT'],
+      [GSI.L_SIXTEEN_WITHOUT_MARKER, 422, 'AMBIGUOUS_GSI_FORMAT', 'Файлът прилича на Leica GSI-16, но липсва очакваният маркер. Форматът не може да бъде потвърден безопасно.'],
       [Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x14, 0x00]), 422, 'BINARY_FILE'],
       [Buffer.from([0xff, 0xfe, 0x31, 0x00, 0x31, 0x00]), 422, 'UNSUPPORTED_ENCODING'],
       [Buffer.from('110001+00000101 ä', 'latin1'), 422, 'UNSUPPORTED_ENCODING'],

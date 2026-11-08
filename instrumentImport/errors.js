@@ -15,7 +15,12 @@ const FILE_ERRORS = {
   BINARY_FILE: { status: 422, message: 'Файлът не е текстов. Очаква се текстов файл на Leica GSI.' },
   UNSUPPORTED_ENCODING: { status: 422, message: 'Кодировката на файла не се поддържа. Очаква се ASCII / UTF-8 текст.' },
   UNSUPPORTED_FORMAT: { status: 422, message: 'Форматът не е разпознат.' },
-  AMBIGUOUS_GSI_FORMAT: { status: 422, message: 'Форматът не може да бъде определен еднозначно (GSI-8 или GSI-16). Проверете настройките на експорта.' },
+  AMBIGUOUS_GSI_FORMAT: {
+    status: 422,
+    message: 'Форматът не може да бъде определен еднозначно (GSI-8 или GSI-16). Проверете настройките на експорта.',
+    // the same refusal, worded for its one specific cause (still a fixed sentence chosen by code, never file content)
+    variants: { UNMARKED_GSI16: 'Файлът прилича на Leica GSI-16, но липсва очакваният маркер. Форматът не може да бъде потвърден безопасно.' },
+  },
 };
 
 const ISSUES = {
@@ -42,7 +47,7 @@ const ISSUES = {
 class InstrumentImportError extends Error {
   constructor(code, extra = {}) {
     const def = FILE_ERRORS[code] || FILE_ERRORS.UNSUPPORTED_FORMAT;
-    super(def.message);
+    super((extra.variant && def.variants && def.variants[extra.variant]) || def.message);
     this.name = 'InstrumentImportError';
     this.code = FILE_ERRORS[code] ? code : 'UNSUPPORTED_FORMAT';
     this.status = def.status;

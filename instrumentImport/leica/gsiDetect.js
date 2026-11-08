@@ -26,7 +26,7 @@ function detectGsi(lines) {
     // 16-digit words without the "*" marker: recognisably GSI-16 data, but not a file we can identify with certainty
     if (format === 'GSI-8') {
       const asSixteen = lines.filter((l) => tokenizeLine(l.text, 'GSI-16', { requireMarker: false })).length / lines.length;
-      if (asSixteen >= MIN_FIT) throw new InstrumentImportError('AMBIGUOUS_GSI_FORMAT');
+      if (asSixteen >= MIN_FIT) throw new InstrumentImportError('AMBIGUOUS_GSI_FORMAT', { variant: 'UNMARKED_GSI16' });
     }
     throw new InstrumentImportError('UNSUPPORTED_FORMAT');
   }

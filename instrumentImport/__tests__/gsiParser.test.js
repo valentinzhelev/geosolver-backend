@@ -105,8 +105,15 @@ describe('format detection', () => {
     expect(codeOf(() => detectGsi(decodeText(buf(F.L_MIXED_MARKERS)).lines))).toBe('AMBIGUOUS_GSI_FORMAT');
   });
 
-  test('16-character words without the "*" marker -> AMBIGUOUS_GSI_FORMAT (never guessed as GSI-16)', () => {
-    expect(codeOf(() => detectGsi(decodeText(buf(F.L_SIXTEEN_WITHOUT_MARKER)).lines))).toBe('AMBIGUOUS_GSI_FORMAT');
+  test('16-character words without the "*" marker -> AMBIGUOUS_GSI_FORMAT (never guessed as GSI-16), worded for that cause', () => {
+    let err;
+    try { detectGsi(decodeText(buf(F.L_SIXTEEN_WITHOUT_MARKER)).lines); } catch (e) { err = e; }
+    expect(err.code).toBe('AMBIGUOUS_GSI_FORMAT');
+    expect(err.message).toBe('Файлът прилича на Leica GSI-16, но липсва очакваният маркер. Форматът не може да бъде потвърден безопасно.');
+    // the mixed-marker refusal keeps its own wording
+    let mixed;
+    try { detectGsi(decodeText(buf(F.L_MIXED_MARKERS)).lines); } catch (e) { mixed = e; }
+    expect(mixed.message).toBe('Форматът не може да бъде определен еднозначно (GSI-8 или GSI-16). Проверете настройките на експорта.');
   });
 
   test('anything else -> UNSUPPORTED_FORMAT "Форматът не е разпознат."', () => {
